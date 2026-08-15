@@ -1,0 +1,19 @@
+{
+  "name": "badbox",
+  "module": "src/cli.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "scan": "bun run src/cli.ts scan",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@ast-grep/napi": "^0.45.1"
+  }
+}
