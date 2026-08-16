@@ -3,6 +3,10 @@
   "version": "0.0.1",
   "description": "Deterministic bad-pattern detection for codebases.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0ctacity/badbox.git"
+  },
   "type": "module",
   "module": "./src/rules/index.ts",
   "types": "./src/rules/index.ts",
