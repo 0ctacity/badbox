@@ -8,6 +8,17 @@ This repository currently contains the initial Bun/TypeScript scaffold. The
 first planned vertical slice is `react/multiple-effects`; scanning and rule
 execution are intentionally not implemented yet.
 
+## Install
+
+Badbox requires Bun 1.3.14 or newer.
+
+```bash
+bun add badbox
+```
+
+The package currently exposes the executable TypeScript rule format. The
+`badbox scan` command remains scaffolded while the first rule is implemented.
+
 ## Development
 
 Install dependencies:

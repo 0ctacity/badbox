@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 const usage = "Usage: badbox scan";
 
 const [command] = Bun.argv.slice(2);
