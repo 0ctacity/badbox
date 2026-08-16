@@ -1,11 +1,32 @@
-import type { Rule } from "./types.ts";
+import type { RuleDefinition } from "./types.ts";
+
+const ruleIdPattern = /^[a-z][a-z0-9-]*\/[a-z][a-z0-9-]*$/;
 
 export type {
+  Ast,
+  AstNode,
+  CountEvidence,
   Finding,
   FindingEvidence,
-  Rule,
+  FindingInput,
+  Framework,
+  Language,
+  RuleApplicability,
+  RuleContext,
+  RuleDefinition,
   Severity,
+  SourceFile,
   SourceLocation,
 } from "./types.ts";
 
-export const builtInRules: readonly Rule[] = [];
+export function defineRule<const T extends RuleDefinition>(definition: T): T {
+  if (!ruleIdPattern.test(definition.id)) {
+    throw new TypeError(
+      `Invalid rule ID "${definition.id}": expected lowercase namespace/name`,
+    );
+  }
+
+  return definition;
+}
+
+export const builtInRules: readonly RuleDefinition[] = [];
