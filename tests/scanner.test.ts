@@ -261,14 +261,19 @@ describe("native counting capability probes", () => {
     expect(cold.performance?.selectorExecutions).toBe(1);
     expect(cold.performance?.ruleEvaluations).toBe(2);
     expect(cold.performance?.ruleCacheMisses).toBe(2);
+    expect(cold.performance?.resultCacheMisses).toBe(1);
     expect(cold.performance?.parseCacheMisses).toBe(1);
     const warm = await run();
     expect([...warm.findings]).toEqual([...cold.findings]);
     expect(warm.performance?.ruleCacheHits).toBe(2);
-    expect(warm.performance?.parseCacheHits).toBe(1);
+    expect(warm.performance?.resultCacheHits).toBe(1);
+    expect(warm.performance?.parseCacheHits).toBe(0);
+    expect(warm.performance?.selectorExecutions).toBe(0);
+    expect(warm.performance?.ruleEvaluations).toBe(0);
 
     await Bun.write(source, "fn example() { a.clone(); b.clone(); c.clone(); }");
     const changedSource = await run();
+    expect(changedSource.performance?.resultCacheMisses).toBe(1);
     expect(changedSource.performance?.parseCacheMisses).toBe(1);
     expect(records(changedSource).map((finding) => finding.observed)).toEqual([3, 3]);
 
@@ -276,6 +281,33 @@ describe("native counting capability probes", () => {
     const changedRule = await run();
     expect(changedRule.performance?.ruleCacheHits).toBe(1);
     expect(changedRule.performance?.ruleCacheMisses).toBe(1);
+    expect(changedRule.performance?.resultCacheMisses).toBe(1);
+    expect(changedRule.performance?.parseCacheHits).toBe(1);
+  });
+
+  test("reuses compact results beyond the bounded AST cache and remaps file IDs", async () => {
+    const root = await temporaryRoot();
+    const fileCount = 300;
+    for (let index = 0; index < fileCount; index++) {
+      await Bun.write(
+        join(root, `${String(index).padStart(3, "0")}.rs`),
+        `fn owner_${index}() { a.clone(); b.clone(); }`,
+      );
+    }
+
+    const options = { paths: [root], rulePaths: [rustRulePath], profile: true } as const;
+    const cold = await inspect(options);
+    const warm = await inspect(options);
+
+    expect(cold.findingCount).toBe(fileCount);
+    expect(cold.performance?.resultCacheMisses).toBe(fileCount);
+    expect(warm.findingCount).toBe(fileCount);
+    expect(warm.performance?.resultCacheHits).toBe(fileCount);
+    expect(warm.performance?.resultCacheMisses).toBe(0);
+    expect(warm.performance?.parseCacheHits).toBe(0);
+    expect(warm.performance?.parseCacheMisses).toBe(0);
+    expect(warm.performance?.selectorExecutions).toBe(0);
+    expect(records(warm).map((finding) => finding.file)).toEqual([...warm.files]);
   });
 
   test("bounds native file parallelism", async () => {

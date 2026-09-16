@@ -18,8 +18,9 @@ use napi::{
 use napi_derive::napi;
 use rayon::{ThreadPool, ThreadPoolBuilder, prelude::*};
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     fs,
+    mem::size_of,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
@@ -28,7 +29,11 @@ use std::{
 const RULE_CACHE_ENTRIES: usize = 256;
 const PARSE_CACHE_ENTRIES: usize = 256;
 const PARSE_CACHE_SOURCE_BYTES: usize = 16 * 1024 * 1024;
+const RESULT_CACHE_ENTRIES: usize = 16 * 1024;
+const RESULT_CACHE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_SCAN_THREADS: usize = 4;
+
+type Fingerprint = [u8; 32];
 
 type CompiledRule = <AstGrepBackend as StructuralBackend>::CompiledRule;
 type ExecutionKey = <AstGrepBackend as StructuralBackend>::ExecutionKey;
@@ -37,6 +42,7 @@ type ParsedFile = <AstGrepBackend as StructuralBackend>::ParsedFile;
 struct RuleCacheEntry {
     path: PathBuf,
     source: String,
+    fingerprint: Fingerprint,
     rule: Arc<CompiledRule>,
 }
 
@@ -58,8 +64,144 @@ struct ParseCache {
     source_bytes: usize,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ResultRevision {
+    source: Fingerprint,
+    plan: Fingerprint,
+    language: Language,
+    threshold: Option<u32>,
+    max_findings: usize,
+}
+
+#[derive(Clone)]
+struct CachedFileScan {
+    scanned: bool,
+    findings: Vec<CompactFinding>,
+    finding_count: usize,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl CachedFileScan {
+    fn from_file_scan(scan: &FileScan) -> Self {
+        Self {
+            scanned: scan.scanned,
+            findings: scan.findings.clone(),
+            finding_count: scan.finding_count,
+            diagnostics: scan.diagnostics.clone(),
+        }
+    }
+
+    fn estimated_bytes(&self, path: &Path) -> usize {
+        size_of::<ResultCacheEntry>()
+            + path.as_os_str().as_encoded_bytes().len()
+            + self.findings.len() * size_of::<CompactFinding>()
+            + self
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.file.len() + diagnostic.message.len())
+                .sum::<usize>()
+    }
+
+    fn into_file_scan(mut self, file_id: u32, read: Duration) -> FileScan {
+        for finding in &mut self.findings {
+            finding.file_id = file_id;
+        }
+        FileScan {
+            scanned: self.scanned,
+            findings: self.findings,
+            finding_count: self.finding_count,
+            diagnostics: self.diagnostics,
+            timings: FileTimings {
+                read,
+                ..FileTimings::default()
+            },
+            result_cache: CacheCounts { hits: 1, misses: 0 },
+            ..FileScan::default()
+        }
+    }
+}
+
+struct ResultCacheEntry {
+    revision: ResultRevision,
+    result: CachedFileScan,
+    estimated_bytes: usize,
+    last_used: u64,
+}
+
+struct ResultCacheCandidate {
+    path: PathBuf,
+    revision: ResultRevision,
+    result: CachedFileScan,
+    estimated_bytes: usize,
+}
+
+#[derive(Default)]
+struct ResultCache {
+    entries: HashMap<PathBuf, ResultCacheEntry>,
+    estimated_bytes: usize,
+    clock: u64,
+}
+
+impl ResultCache {
+    fn get(&mut self, path: &Path, revision: ResultRevision) -> Option<CachedFileScan> {
+        let entry = self.entries.get_mut(path)?;
+        if entry.revision != revision {
+            return None;
+        }
+        self.clock = self.clock.wrapping_add(1);
+        entry.last_used = self.clock;
+        Some(entry.result.clone())
+    }
+
+    fn insert_batch(&mut self, candidates: Vec<ResultCacheCandidate>) {
+        for candidate in candidates {
+            self.clock = self.clock.wrapping_add(1);
+            if let Some(previous) = self.entries.remove(&candidate.path) {
+                self.estimated_bytes = self
+                    .estimated_bytes
+                    .saturating_sub(previous.estimated_bytes);
+            }
+            self.estimated_bytes += candidate.estimated_bytes;
+            self.entries.insert(
+                candidate.path,
+                ResultCacheEntry {
+                    revision: candidate.revision,
+                    result: candidate.result,
+                    estimated_bytes: candidate.estimated_bytes,
+                    last_used: self.clock,
+                },
+            );
+        }
+        self.trim();
+    }
+
+    fn trim(&mut self) {
+        if self.entries.len() <= RESULT_CACHE_ENTRIES && self.estimated_bytes <= RESULT_CACHE_BYTES
+        {
+            return;
+        }
+        let mut oldest = self
+            .entries
+            .iter()
+            .map(|(path, entry)| (entry.last_used, path.clone()))
+            .collect::<Vec<_>>();
+        oldest.sort_by_key(|(last_used, _)| *last_used);
+        for (_, path) in oldest {
+            if self.entries.len() <= RESULT_CACHE_ENTRIES
+                && self.estimated_bytes <= RESULT_CACHE_BYTES
+            {
+                break;
+            }
+            if let Some(entry) = self.entries.remove(&path) {
+                self.estimated_bytes = self.estimated_bytes.saturating_sub(entry.estimated_bytes);
+            }
+        }
+    }
+}
+
 static RULE_CACHE: OnceLock<Mutex<RuleCache>> = OnceLock::new();
 static PARSE_CACHE: OnceLock<Mutex<ParseCache>> = OnceLock::new();
+static RESULT_CACHE: OnceLock<Mutex<ResultCache>> = OnceLock::new();
 static SCAN_POOL: OnceLock<std::result::Result<ThreadPool, String>> = OnceLock::new();
 
 fn scan_pool() -> Result<&'static ThreadPool> {
@@ -82,12 +224,22 @@ struct CacheCounts {
 }
 
 struct LoadedRules {
-    rules: Vec<Arc<CompiledRule>>,
+    rules: Vec<LoadedRule>,
     cache: CacheCounts,
+}
+
+struct LoadedRule {
+    rule: Arc<CompiledRule>,
+    fingerprint: Fingerprint,
 }
 
 struct ExecutionGroup {
     rules: Vec<PlannedRule>,
+}
+
+struct LanguagePlan {
+    groups: Vec<ExecutionGroup>,
+    fingerprint: Fingerprint,
 }
 
 struct PlannedRule {
@@ -95,7 +247,7 @@ struct PlannedRule {
     rule: Arc<CompiledRule>,
 }
 
-type ExecutionPlans = BTreeMap<Language, Vec<ExecutionGroup>>;
+type ExecutionPlans = BTreeMap<Language, LanguagePlan>;
 
 #[derive(Default)]
 struct FileTimings {
@@ -108,6 +260,14 @@ struct FileTimings {
     output_build: Duration,
 }
 
+#[derive(Clone, Copy)]
+struct FileScanSettings {
+    plan_fingerprint: Fingerprint,
+    threshold: Option<u32>,
+    max_findings: usize,
+    profile: bool,
+}
+
 #[derive(Default)]
 struct FileScan {
     scanned: bool,
@@ -118,13 +278,16 @@ struct FileScan {
     selector_executions: usize,
     rule_evaluations: usize,
     parse_cache: CacheCounts,
+    result_cache: CacheCounts,
+    result_cache_candidate: Option<ResultCacheCandidate>,
 }
 
-fn cached_rule(path: &str) -> Result<(Arc<CompiledRule>, bool)> {
+fn cached_rule(path: &str) -> Result<(Arc<CompiledRule>, Fingerprint, bool)> {
     let canonical = Path::new(path)
         .canonicalize()
         .with_context(|| format!("rule {path}"))?;
     let source = fs::read_to_string(&canonical).with_context(|| format!("rule {path}"))?;
+    let fingerprint = *blake3::hash(source.as_bytes()).as_bytes();
     let cache = RULE_CACHE.get_or_init(|| Mutex::new(RuleCache::default()));
     {
         let mut cache = cache
@@ -137,8 +300,9 @@ fn cached_rule(path: &str) -> Result<(Arc<CompiledRule>, bool)> {
         {
             let entry = cache.entries.remove(index).expect("cache index exists");
             let rule = Arc::clone(&entry.rule);
+            let fingerprint = entry.fingerprint;
             cache.entries.push_back(entry);
-            return Ok((rule, true));
+            return Ok((rule, fingerprint, true));
         }
     }
 
@@ -154,9 +318,10 @@ fn cached_rule(path: &str) -> Result<(Arc<CompiledRule>, bool)> {
     cache.entries.push_back(RuleCacheEntry {
         path: canonical,
         source,
+        fingerprint,
         rule: Arc::clone(&rule),
     });
-    Ok((rule, false))
+    Ok((rule, fingerprint, false))
 }
 
 fn load_rules(paths: &[String]) -> Result<LoadedRules> {
@@ -165,7 +330,7 @@ fn load_rules(paths: &[String]) -> Result<LoadedRules> {
     let mut rules = Vec::with_capacity(paths.len());
     let mut counts = CacheCounts::default();
     for path in paths {
-        let (rule, hit) = cached_rule(path)?;
+        let (rule, fingerprint, hit) = cached_rule(path)?;
         ensure!(
             ids.insert(AstGrepBackend::rule(&rule).id.clone()),
             "duplicate rule ID: {}",
@@ -176,7 +341,7 @@ fn load_rules(paths: &[String]) -> Result<LoadedRules> {
         } else {
             counts.misses += 1;
         }
-        rules.push(rule);
+        rules.push(LoadedRule { rule, fingerprint });
     }
     Ok(LoadedRules {
         rules,
@@ -184,11 +349,17 @@ fn load_rules(paths: &[String]) -> Result<LoadedRules> {
     })
 }
 
-fn execution_plans(rules: &[Arc<CompiledRule>]) -> ExecutionPlans {
+fn execution_plans(rules: &[LoadedRule]) -> ExecutionPlans {
     let mut plans: BTreeMap<Language, BTreeMap<ExecutionKey, Vec<PlannedRule>>> = BTreeMap::new();
-    for (index, rule) in rules.iter().enumerate() {
+    let mut fingerprints: BTreeMap<Language, blake3::Hasher> = BTreeMap::new();
+    for (index, loaded) in rules.iter().enumerate() {
+        let rule = &loaded.rule;
+        let language = AstGrepBackend::rule(rule).language;
+        let fingerprint = fingerprints.entry(language).or_default();
+        fingerprint.update(&(index as u64).to_le_bytes());
+        fingerprint.update(&loaded.fingerprint);
         plans
-            .entry(AstGrepBackend::rule(rule).language)
+            .entry(language)
             .or_default()
             .entry(AstGrepBackend::execution_key(rule).clone())
             .or_default()
@@ -202,10 +373,17 @@ fn execution_plans(rules: &[Arc<CompiledRule>]) -> ExecutionPlans {
         .map(|(language, groups)| {
             (
                 language,
-                groups
-                    .into_values()
-                    .map(|rules| ExecutionGroup { rules })
-                    .collect(),
+                LanguagePlan {
+                    groups: groups
+                        .into_values()
+                        .map(|rules| ExecutionGroup { rules })
+                        .collect(),
+                    fingerprint: *fingerprints
+                        .remove(&language)
+                        .expect("language plan has a fingerprint")
+                        .finalize()
+                        .as_bytes(),
+                },
             )
         })
         .collect()
@@ -295,26 +473,61 @@ fn parsed_file(path: &Path, source: &str, language: Language) -> Result<(Arc<Par
     Ok((parsed, false))
 }
 
+fn cached_file_result(path: &Path, revision: ResultRevision) -> Result<Option<CachedFileScan>> {
+    let cache = RESULT_CACHE.get_or_init(|| Mutex::new(ResultCache::default()));
+    let mut cache = cache
+        .lock()
+        .map_err(|_| anyhow!("result cache lock is poisoned"))?;
+    Ok(cache.get(path, revision))
+}
+
+fn cache_candidate(path: &Path, revision: ResultRevision, scan: &FileScan) -> ResultCacheCandidate {
+    let result = CachedFileScan::from_file_scan(scan);
+    ResultCacheCandidate {
+        path: path.to_owned(),
+        revision,
+        estimated_bytes: result.estimated_bytes(path),
+        result,
+    }
+}
+
+fn commit_result_cache(candidates: Vec<ResultCacheCandidate>) -> Result<()> {
+    let cache = RESULT_CACHE.get_or_init(|| Mutex::new(ResultCache::default()));
+    let mut cache = cache
+        .lock()
+        .map_err(|_| anyhow!("result cache lock is poisoned"))?;
+    cache.insert_batch(candidates);
+    Ok(())
+}
+
 fn scan_file(
     file: &Path,
     file_id: u32,
     language: Language,
     plan: &[ExecutionGroup],
-    threshold: Option<u32>,
-    max_findings: usize,
-    profile: bool,
+    settings: FileScanSettings,
 ) -> Result<FileScan> {
     let file_name = file.to_str().context("scan path is not valid UTF-8")?;
     let read_started = Instant::now();
     let source = fs::read_to_string(file).with_context(|| format!("reading {file_name}"))?;
-    let read = if profile {
+    let read = if settings.profile {
         read_started.elapsed()
     } else {
         Duration::default()
     };
+    let revision = ResultRevision {
+        source: *blake3::hash(source.as_bytes()).as_bytes(),
+        plan: settings.plan_fingerprint,
+        language,
+        threshold: settings.threshold,
+        max_findings: settings.max_findings,
+    };
+    if let Some(cached) = cached_file_result(file, revision)? {
+        return Ok(cached.into_file_scan(file_id, read));
+    }
     let parse_started = Instant::now();
     let parsed = parsed_file(file, &source, language);
-    let parse = if profile {
+    let parse = if settings.profile {
         parse_started.elapsed()
     } else {
         Duration::default()
@@ -322,7 +535,7 @@ fn scan_file(
     let (parsed, cache_hit) = match parsed {
         Ok(parsed) => parsed,
         Err(error) => {
-            return Ok(FileScan {
+            let mut scan = FileScan {
                 diagnostics: vec![Diagnostic {
                     file: file_name.to_owned(),
                     message: error.to_string(),
@@ -333,15 +546,18 @@ fn scan_file(
                     ..FileTimings::default()
                 },
                 parse_cache: CacheCounts { hits: 0, misses: 1 },
+                result_cache: CacheCounts { hits: 0, misses: 1 },
                 ..FileScan::default()
-            });
+            };
+            scan.result_cache_candidate = Some(cache_candidate(file, revision, &scan));
+            return Ok(scan);
         }
     };
     let representatives = plan
         .iter()
         .map(|group| group.rules[0].rule.as_ref())
         .collect::<Vec<_>>();
-    let selection = AstGrepBackend::select_many(&parsed, &representatives, profile);
+    let selection = AstGrepBackend::select_many(&parsed, &representatives, settings.profile);
     let mut findings = Vec::new();
     let mut evaluation = Duration::ZERO;
     let mut aggregation = Duration::ZERO;
@@ -352,29 +568,29 @@ fn scan_file(
         for planned in &group.rules {
             let rule = AstGrepBackend::rule(&planned.rule);
             let started = Instant::now();
-            let remaining = max_findings.saturating_sub(findings.len());
+            let remaining = settings.max_findings.saturating_sub(findings.len());
             let result = evaluator::evaluate(
                 rule,
                 matches,
                 evaluator::EvaluationOptions {
                     file_id,
                     rule_id: planned.index,
-                    threshold: threshold.unwrap_or(rule.threshold.greater_than()),
+                    threshold: settings.threshold.unwrap_or(rule.threshold.greater_than()),
                     max_findings: remaining,
-                    profile,
+                    profile: settings.profile,
                 },
             )?;
             finding_count += result.finding_count;
             findings.extend(result.findings);
             aggregation += result.aggregation;
             output_build += result.output_build;
-            if profile {
+            if settings.profile {
                 evaluation += started.elapsed();
             }
             rule_evaluations += 1;
         }
     }
-    Ok(FileScan {
+    let mut scan = FileScan {
         scanned: true,
         findings,
         finding_count,
@@ -394,8 +610,11 @@ fn scan_file(
         } else {
             CacheCounts { hits: 0, misses: 1 }
         },
+        result_cache: CacheCounts { hits: 0, misses: 1 },
         ..FileScan::default()
-    })
+    };
+    scan.result_cache_candidate = Some(cache_candidate(file, revision, &scan));
+    Ok(scan)
 }
 
 fn milliseconds(duration: Duration) -> f64 {
@@ -413,8 +632,8 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
     let rules = loaded
         .rules
         .iter()
-        .map(|compiled| {
-            let rule = AstGrepBackend::rule(compiled);
+        .map(|loaded| {
+            let rule = AstGrepBackend::rule(&loaded.rule);
             RuleMetadata {
                 id: rule.id.clone(),
                 language: rule.language,
@@ -477,6 +696,8 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
         performance: None,
     };
     let mut findings = Vec::new();
+    let mut result_cache_candidates = Vec::new();
+    let mut result_cache_candidate_bytes = 0;
     for (chunk_index, chunk) in file_list.chunks(MAX_SCAN_THREADS).enumerate() {
         let first_file_id = chunk_index * MAX_SCAN_THREADS;
         let scans = pool.install(|| {
@@ -485,7 +706,7 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
                 .enumerate()
                 .map(|(index, file)| {
                     let language = Language::for_path(file).expect("relevant file has a language");
-                    let plan = plans
+                    let language_plan = plans
                         .get(&language)
                         .expect("relevant file has an execution plan");
                     scan_file(
@@ -493,16 +714,26 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
                         u32::try_from(first_file_id + index)
                             .expect("file count was checked against u32::MAX"),
                         language,
-                        plan,
-                        options.threshold,
-                        options.max_findings as usize,
-                        options.profile,
+                        &language_plan.groups,
+                        FileScanSettings {
+                            plan_fingerprint: language_plan.fingerprint,
+                            threshold: options.threshold,
+                            max_findings: options.max_findings as usize,
+                            profile: options.profile,
+                        },
                     )
                 })
                 .collect::<Result<Vec<_>>>()
         })?;
         let merge_started = options.profile.then(Instant::now);
         for mut file in scans {
+            if let Some(candidate) = file.result_cache_candidate.take()
+                && result_cache_candidates.len() < RESULT_CACHE_ENTRIES
+                && result_cache_candidate_bytes + candidate.estimated_bytes <= RESULT_CACHE_BYTES
+            {
+                result_cache_candidate_bytes += candidate.estimated_bytes;
+                result_cache_candidates.push(candidate);
+            }
             metadata.scanned_files += usize::from(file.scanned);
             metadata.finding_count += file.finding_count;
             let remaining = (options.max_findings as usize).saturating_sub(findings.len());
@@ -519,11 +750,14 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
             performance.rule_evaluations += file.rule_evaluations;
             performance.parse_cache_hits += file.parse_cache.hits;
             performance.parse_cache_misses += file.parse_cache.misses;
+            performance.result_cache_hits += file.result_cache.hits;
+            performance.result_cache_misses += file.result_cache.misses;
         }
         if let Some(merge_started) = merge_started {
             performance.result_merge_ms += milliseconds(merge_started.elapsed());
         }
     }
+    commit_result_cache(result_cache_candidates)?;
     metadata.truncated = metadata.finding_count > findings.len();
     findings.sort_by_key(|finding| (finding.file_id, finding.owner_start, finding.rule_id));
     metadata

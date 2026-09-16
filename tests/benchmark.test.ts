@@ -51,8 +51,10 @@ test("benchmark workers consume native results and detect incorrect expectations
     const performance = result.performance;
     expect(performance).toBeDefined();
     if (!performance) throw new Error("profiled benchmark worker omitted performance data");
-    expect(performance.selectorExecutions).toBe(10);
-    expect(performance.ruleEvaluations).toBe(10);
+    expect(performance.resultCacheHits).toBe(1);
+    expect(performance.resultCacheMisses).toBe(0);
+    expect(performance.selectorExecutions).toBe(0);
+    expect(performance.ruleEvaluations).toBe(0);
     expect(performance.ruleLoadMs).toBeGreaterThanOrEqual(0);
     expect(performance.serializationMs).toBeGreaterThanOrEqual(0);
     expect(performance.jsDecodeMs).toBeGreaterThanOrEqual(0);

@@ -81,6 +81,8 @@ export interface PerformanceProfile {
   readonly ruleCacheMisses: number;
   readonly parseCacheHits: number;
   readonly parseCacheMisses: number;
+  readonly resultCacheHits: number;
+  readonly resultCacheMisses: number;
   readonly workerThreads: number;
 }
 

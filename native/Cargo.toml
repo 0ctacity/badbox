@@ -15,6 +15,7 @@ harness = false
 anyhow = "1"
 ast-grep-core = "=0.45.1"
 ast-grep-language = { version = "=0.45.1", default-features = false, features = ["builtin-parser"] }
+blake3 = "1.8.7"
 ignore = "0.4"
 napi = "=3.12.2"
 napi-derive = "=3.6.3"

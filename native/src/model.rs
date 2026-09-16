@@ -232,6 +232,8 @@ pub struct PerformanceProfile {
     pub rule_cache_misses: usize,
     pub parse_cache_hits: usize,
     pub parse_cache_misses: usize,
+    pub result_cache_hits: usize,
+    pub result_cache_misses: usize,
     pub worker_threads: usize,
 }
 
