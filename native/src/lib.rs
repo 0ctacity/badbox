@@ -4,12 +4,12 @@ mod frontends;
 mod model;
 mod rule_ir;
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use backend::{StructuralBackend, ast_grep::AstGrepBackend};
 use ignore::WalkBuilder;
 use model::{
     CompactFinding, Diagnostic, FINDING_RECORD_WIDTH, Language, PerformanceProfile, RuleMetadata,
-    ScanMetadata, ScanOptions, ScanOutput,
+    ScalarParameter, ScanMetadata, ScanOptions, ScanOutput,
 };
 use napi::{
     Env, Task,
@@ -17,6 +17,7 @@ use napi::{
 };
 use napi_derive::napi;
 use rayon::{ThreadPool, ThreadPoolBuilder, prelude::*};
+use rule_ir::ParameterValue;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     fs,
@@ -43,7 +44,7 @@ struct RuleCacheEntry {
     path: PathBuf,
     source: String,
     fingerprint: Fingerprint,
-    rule: Arc<CompiledRule>,
+    rules: Vec<Arc<CompiledRule>>,
 }
 
 #[derive(Default)]
@@ -69,7 +70,6 @@ struct ResultRevision {
     source: Fingerprint,
     plan: Fingerprint,
     language: Language,
-    threshold: Option<u32>,
     max_findings: usize,
 }
 
@@ -233,6 +233,12 @@ struct LoadedRule {
     fingerprint: Fingerprint,
 }
 
+struct ResolvedRule {
+    rule: Arc<CompiledRule>,
+    fingerprint: Fingerprint,
+    threshold: u32,
+}
+
 struct ExecutionGroup {
     rules: Vec<PlannedRule>,
 }
@@ -245,6 +251,7 @@ struct LanguagePlan {
 struct PlannedRule {
     index: u32,
     rule: Arc<CompiledRule>,
+    threshold: u32,
 }
 
 type ExecutionPlans = BTreeMap<Language, LanguagePlan>;
@@ -263,7 +270,6 @@ struct FileTimings {
 #[derive(Clone, Copy)]
 struct FileScanSettings {
     plan_fingerprint: Fingerprint,
-    threshold: Option<u32>,
     max_findings: usize,
     profile: bool,
 }
@@ -282,11 +288,12 @@ struct FileScan {
     result_cache_candidate: Option<ResultCacheCandidate>,
 }
 
-fn cached_rule(path: &str) -> Result<(Arc<CompiledRule>, Fingerprint, bool)> {
-    let canonical = Path::new(path)
+fn cached_rules(path: &Path) -> Result<(Vec<Arc<CompiledRule>>, Fingerprint, bool)> {
+    let canonical = path
         .canonicalize()
-        .with_context(|| format!("rule {path}"))?;
-    let source = fs::read_to_string(&canonical).with_context(|| format!("rule {path}"))?;
+        .with_context(|| format!("rule {}", path.display()))?;
+    let source =
+        fs::read_to_string(&canonical).with_context(|| format!("rule {}", path.display()))?;
     let fingerprint = *blake3::hash(source.as_bytes()).as_bytes();
     let cache = RULE_CACHE.get_or_init(|| Mutex::new(RuleCache::default()));
     {
@@ -299,15 +306,32 @@ fn cached_rule(path: &str) -> Result<(Arc<CompiledRule>, Fingerprint, bool)> {
             .position(|entry| entry.path == canonical && entry.source == source)
         {
             let entry = cache.entries.remove(index).expect("cache index exists");
-            let rule = Arc::clone(&entry.rule);
+            let rules = entry.rules.iter().map(Arc::clone).collect();
             let fingerprint = entry.fingerprint;
             cache.entries.push_back(entry);
-            return Ok((rule, fingerprint, true));
+            return Ok((rules, fingerprint, true));
         }
     }
 
-    let rule = frontends::yaml::compile(&source).with_context(|| format!("rule {path}"))?;
-    let rule = Arc::new(AstGrepBackend::compile(rule).with_context(|| format!("rule {path}"))?);
+    let extension = canonical.extension().and_then(|value| value.to_str());
+    let rules = match extension {
+        Some("badbox") => frontends::dsl::compile(&source),
+        Some("yaml" | "yml") => frontends::yaml::compile(&source).map(|rule| vec![rule]),
+        _ => bail!("unsupported rule file {}", canonical.display()),
+    }
+    .with_context(|| format!("rule {}", path.display()))?
+    .into_iter()
+    .map(|rule| {
+        AstGrepBackend::compile(rule)
+            .map(Arc::new)
+            .with_context(|| format!("rule {}", path.display()))
+    })
+    .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        !rules.is_empty(),
+        "rule file {} does not contain any rules",
+        path.display()
+    );
     let mut cache = cache
         .lock()
         .map_err(|_| anyhow!("rule cache lock is poisoned"))?;
@@ -319,29 +343,32 @@ fn cached_rule(path: &str) -> Result<(Arc<CompiledRule>, Fingerprint, bool)> {
         path: canonical,
         source,
         fingerprint,
-        rule: Arc::clone(&rule),
+        rules: rules.iter().map(Arc::clone).collect(),
     });
-    Ok((rule, fingerprint, false))
+    Ok((rules, fingerprint, false))
 }
 
 fn load_rules(paths: &[String]) -> Result<LoadedRules> {
     ensure!(!paths.is_empty(), "rulePaths must not be empty");
+    let paths = expand_rule_paths(paths)?;
     let mut ids = BTreeSet::new();
-    let mut rules = Vec::with_capacity(paths.len());
+    let mut rules = Vec::new();
     let mut counts = CacheCounts::default();
     for path in paths {
-        let (rule, fingerprint, hit) = cached_rule(path)?;
-        ensure!(
-            ids.insert(AstGrepBackend::rule(&rule).id.clone()),
-            "duplicate rule ID: {}",
-            AstGrepBackend::rule(&rule).id
-        );
-        if hit {
-            counts.hits += 1;
-        } else {
-            counts.misses += 1;
+        let (compiled, fingerprint, hit) = cached_rules(&path)?;
+        for rule in compiled {
+            ensure!(
+                ids.insert(AstGrepBackend::rule(&rule).id.clone()),
+                "duplicate rule ID: {}",
+                AstGrepBackend::rule(&rule).id
+            );
+            if hit {
+                counts.hits += 1;
+            } else {
+                counts.misses += 1;
+            }
+            rules.push(LoadedRule { rule, fingerprint });
         }
-        rules.push(LoadedRule { rule, fingerprint });
     }
     Ok(LoadedRules {
         rules,
@@ -349,7 +376,123 @@ fn load_rules(paths: &[String]) -> Result<LoadedRules> {
     })
 }
 
-fn execution_plans(rules: &[LoadedRule]) -> ExecutionPlans {
+fn expand_rule_paths(paths: &[String]) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for path in paths {
+        let path = Path::new(path);
+        ensure!(path.exists(), "rule {path:?} does not exist");
+        if path.is_file() {
+            files.push(path.to_path_buf());
+            continue;
+        }
+        ensure!(path.is_dir(), "rule {path:?} is not a file or directory");
+        let mut pack_files = BTreeSet::new();
+        for entry in WalkBuilder::new(path).hidden(false).build() {
+            let entry = entry.with_context(|| format!("rule pack {}", path.display()))?;
+            if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+                continue;
+            }
+            if matches!(
+                entry.path().extension().and_then(|value| value.to_str()),
+                Some("badbox" | "yaml" | "yml")
+            ) {
+                pack_files.insert(entry.into_path());
+            }
+        }
+        files.extend(pack_files);
+    }
+    ensure!(
+        !files.is_empty(),
+        "rulePaths did not contain any rule files"
+    );
+    Ok(files)
+}
+
+fn resolve_rules(
+    rules: &[LoadedRule],
+    overrides: &BTreeMap<String, ScalarParameter>,
+    threshold_override: Option<u32>,
+) -> Result<Vec<ResolvedRule>> {
+    let mut by_id = BTreeMap::new();
+    let mut parameters = rules
+        .iter()
+        .enumerate()
+        .map(|(index, loaded)| {
+            by_id.insert(AstGrepBackend::rule(&loaded.rule).id.as_str(), index);
+            AstGrepBackend::rule(&loaded.rule).parameters.clone()
+        })
+        .collect::<Vec<_>>();
+    for (qualified, value) in overrides {
+        let Some((rule_id, name)) = qualified.rsplit_once('.') else {
+            bail!("invalid parameter {qualified}: expected namespace/rule.parameter");
+        };
+        let Some(&index) = by_id.get(rule_id) else {
+            bail!("unknown parameter {qualified}");
+        };
+        let Some(expected) = parameters[index].get(name) else {
+            bail!("unknown parameter {qualified}");
+        };
+        let value = match (expected, value) {
+            (ParameterValue::Integer(_), ScalarParameter::Integer(value)) => {
+                ParameterValue::Integer(*value)
+            }
+            (ParameterValue::Boolean(_), ScalarParameter::Boolean(value)) => {
+                ParameterValue::Boolean(*value)
+            }
+            (ParameterValue::String(_), ScalarParameter::String(value)) => {
+                ParameterValue::String(value.clone())
+            }
+            (ParameterValue::Integer(_), _) => bail!("parameter {qualified} must be an integer"),
+            (ParameterValue::Boolean(_), _) => bail!("parameter {qualified} must be a boolean"),
+            (ParameterValue::String(_), _) => bail!("parameter {qualified} must be a string"),
+        };
+        parameters[index].insert(name.to_owned(), value);
+    }
+
+    rules
+        .iter()
+        .zip(parameters)
+        .map(|(loaded, parameters)| {
+            let rule = AstGrepBackend::rule(&loaded.rule);
+            let threshold = if let Some(threshold) = threshold_override {
+                threshold
+            } else if let Some(name) = &rule.threshold_parameter {
+                match parameters.get(name) {
+                    Some(ParameterValue::Integer(value)) => *value,
+                    _ => bail!("rule {} has invalid count parameter {name}", rule.id),
+                }
+            } else {
+                rule.threshold.greater_than()
+            };
+            let mut fingerprint = blake3::Hasher::new();
+            fingerprint.update(&loaded.fingerprint);
+            fingerprint.update(&threshold.to_le_bytes());
+            for (name, value) in parameters {
+                fingerprint.update(name.as_bytes());
+                match value {
+                    ParameterValue::Integer(value) => {
+                        fingerprint.update(&[0]);
+                        fingerprint.update(&value.to_le_bytes());
+                    }
+                    ParameterValue::Boolean(value) => {
+                        fingerprint.update(&[1, u8::from(value)]);
+                    }
+                    ParameterValue::String(value) => {
+                        fingerprint.update(&[2]);
+                        fingerprint.update(value.as_bytes());
+                    }
+                }
+            }
+            Ok(ResolvedRule {
+                rule: Arc::clone(&loaded.rule),
+                fingerprint: *fingerprint.finalize().as_bytes(),
+                threshold,
+            })
+        })
+        .collect()
+}
+
+fn execution_plans(rules: &[ResolvedRule]) -> ExecutionPlans {
     let mut plans: BTreeMap<Language, BTreeMap<ExecutionKey, Vec<PlannedRule>>> = BTreeMap::new();
     let mut fingerprints: BTreeMap<Language, blake3::Hasher> = BTreeMap::new();
     for (index, loaded) in rules.iter().enumerate() {
@@ -366,6 +509,7 @@ fn execution_plans(rules: &[LoadedRule]) -> ExecutionPlans {
             .push(PlannedRule {
                 index: u32::try_from(index).expect("rule count is limited by u32 input"),
                 rule: Arc::clone(rule),
+                threshold: loaded.threshold,
             });
     }
     plans
@@ -519,7 +663,6 @@ fn scan_file(
         source: *blake3::hash(source.as_bytes()).as_bytes(),
         plan: settings.plan_fingerprint,
         language,
-        threshold: settings.threshold,
         max_findings: settings.max_findings,
     };
     if let Some(cached) = cached_file_result(file, revision)? {
@@ -575,7 +718,7 @@ fn scan_file(
                 evaluator::EvaluationOptions {
                     file_id,
                     rule_id: planned.index,
-                    threshold: settings.threshold.unwrap_or(rule.threshold.greater_than()),
+                    threshold: planned.threshold,
                     max_findings: remaining,
                     profile: settings.profile,
                 },
@@ -624,27 +767,28 @@ fn milliseconds(duration: Duration) -> f64 {
 fn scan(options: ScanOptions) -> Result<ScanOutput> {
     let rule_started = Instant::now();
     let loaded = load_rules(&options.rule_paths)?;
+    let resolved = resolve_rules(&loaded.rules, &options.parameters, options.threshold)?;
     let rule_load = if options.profile {
         rule_started.elapsed()
     } else {
         Duration::default()
     };
-    let rules = loaded
-        .rules
+    let rules = resolved
         .iter()
-        .map(|loaded| {
-            let rule = AstGrepBackend::rule(&loaded.rule);
+        .map(|resolved| {
+            let rule = AstGrepBackend::rule(&resolved.rule);
             RuleMetadata {
                 id: rule.id.clone(),
                 language: rule.language,
                 summary: rule.summary.clone(),
                 severity: rule.severity,
-                threshold: options.threshold.unwrap_or(rule.threshold.greater_than()),
+                message: rule.message.clone(),
+                threshold: resolved.threshold,
                 evidence_subject: rule.evidence.subject.clone(),
             }
         })
         .collect();
-    let plans = execution_plans(&loaded.rules);
+    let plans = execution_plans(&resolved);
     let discovery_started = Instant::now();
     let files = discover(&options.paths)?;
     let discovery = if options.profile {
@@ -717,7 +861,6 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
                         &language_plan.groups,
                         FileScanSettings {
                             plan_fingerprint: language_plan.fingerprint,
-                            threshold: options.threshold,
                             max_findings: options.max_findings as usize,
                             profile: options.profile,
                         },

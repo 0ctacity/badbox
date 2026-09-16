@@ -1,0 +1,14 @@
+badbox 1
+
+rule zig/excessive-as-casts for zig {
+  summary "Function contains multiple @as cast calls"
+  param limit = 1
+  find code(cast_type, value) `@as(cast_type, value)`
+  group by nearest callable
+  when count > limit
+  report {
+    severity info
+    message "Callable contains more @as cast sites than the configured limit"
+    evidence "@as cast call sites"
+  }
+}

@@ -35,6 +35,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # local native engine build
 native/target/
+native/tiny-dsl/target/
+native/tiny-dsl/Cargo.lock
 native/build/
 
 # local benchmark output

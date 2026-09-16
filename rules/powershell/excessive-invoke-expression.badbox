@@ -1,0 +1,14 @@
+badbox 1
+
+rule powershell/excessive-invoke-expression for powershell {
+  summary "Function contains multiple Invoke-Expression calls"
+  param limit = 1
+  find code(command) `Invoke-Expression command`
+  group by nearest callable
+  when count > limit
+  report {
+    severity info
+    message "Callable contains more Invoke-Expression sites than the configured limit"
+    evidence "Invoke-Expression call sites"
+  }
+}

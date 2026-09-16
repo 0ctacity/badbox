@@ -12,10 +12,10 @@ export { findingRecord, findingRecordWidth };
 
 const require = createRequire(import.meta.url);
 const defaultRulePaths = [
-  "../../rules/rust/excessive-clones.yaml",
-  "../../rules/go/excessive-goroutines.yaml",
-  "../../rules/powershell/excessive-invoke-expression.yaml",
-  "../../rules/zig/excessive-as-casts.yaml",
+  "../../rules/rust/excessive-clones.badbox",
+  "../../rules/go/excessive-goroutines.badbox",
+  "../../rules/powershell/excessive-invoke-expression.badbox",
+  "../../rules/zig/excessive-as-casts.badbox",
 ].map((path) => fileURLToPath(new URL(path, import.meta.url)));
 
 interface NativeEngine {
@@ -33,6 +33,13 @@ export async function inspect(options: InspectOptions): Promise<ScanResult> {
       throw new TypeError(`${name} must be an unsigned 32-bit integer`);
     }
   }
+  for (const [key, value] of Object.entries(options.parameters ?? {})) {
+    if (!key.length) throw new TypeError("parameter key must not be empty");
+    if (typeof value === "number" &&
+        (!Number.isInteger(value) || value < 0 || value > 0xffffffff)) {
+      throw new TypeError(`parameter ${key} must be an unsigned 32-bit integer, boolean, or string`);
+    }
+  }
   let native: NativeEngine;
   try {
     native = require("../../native/build/badbox.node") as NativeEngine;
@@ -42,6 +49,7 @@ export async function inspect(options: InspectOptions): Promise<ScanResult> {
   const response = await native.inspect(JSON.stringify({
     paths: options.paths,
     rulePaths: options.rulePaths ?? defaultRulePaths,
+    parameters: options.parameters ?? {},
     threshold: options.threshold,
     profile: options.profile ?? false,
     maxFindings: options.maxFindings,

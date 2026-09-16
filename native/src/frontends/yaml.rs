@@ -14,6 +14,8 @@ struct YamlRule {
     id: String,
     language: Language,
     summary: String,
+    #[serde(default)]
+    message: Option<String>,
     severity: Severity,
     select: YamlSelector,
     owner: YamlOwner,
@@ -86,11 +88,15 @@ pub fn compile(source: &str) -> Result<Rule> {
         "evidence.subject must not be empty"
     );
 
+    let message = yaml.message.unwrap_or_else(|| yaml.summary.clone());
     Ok(Rule {
         id: yaml.id,
         language: yaml.language,
         summary: yaml.summary,
         severity: yaml.severity,
+        message,
+        parameters: Default::default(),
+        threshold_parameter: None,
         selection: match yaml.select {
             YamlSelector::Pattern(selector) => StructuralSelection::Pattern(selector.pattern),
             YamlSelector::Kind(selector) => StructuralSelection::Kind(selector.kind),

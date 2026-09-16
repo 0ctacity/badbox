@@ -90,6 +90,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "tiny-dsl",
  "tree-sitter-powershell",
  "tree-sitter-zig",
 ]
@@ -729,6 +730,10 @@ dependencies = [
  "quote",
  "syn 3.0.4",
 ]
+
+[[package]]
+name = "tiny-dsl"
+version = "0.0.1"
 
 [[package]]
 name = "toml_datetime"

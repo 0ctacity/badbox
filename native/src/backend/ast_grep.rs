@@ -580,6 +580,9 @@ function Example {
             language: Language::PowerShell,
             summary: "test".to_owned(),
             severity: crate::model::Severity::Info,
+            message: "test".to_owned(),
+            parameters: Default::default(),
+            threshold_parameter: None,
             selection: StructuralSelection::Pattern(
                 "Write-Output $__BADBOX_CAPTURE_VALUE".to_owned(),
             ),

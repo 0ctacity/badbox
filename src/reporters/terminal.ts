@@ -4,7 +4,8 @@ export function reportScan(result: ScanResult): void {
   for (const finding of iterateFindings(result)) {
     console.log(`${finding.file}:${finding.ownerStart}-${finding.ownerEnd} ` +
       `[${finding.rule.severity}] ${finding.rule.id}: ` +
-      `${finding.observed} > ${finding.rule.threshold} ${finding.rule.evidenceSubject}`);
+      `${finding.rule.message} ` +
+      `(${finding.observed} > ${finding.rule.threshold} ${finding.rule.evidenceSubject})`);
   }
   for (const diagnostic of result.diagnostics) {
     console.error(`${diagnostic.file}: ${diagnostic.message}`);

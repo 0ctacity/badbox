@@ -7,8 +7,9 @@ agent.
 This development checkout implements four capability probes:
 `rust/excessive-clones`, `go/excessive-goroutines`,
 `powershell/excessive-invoke-expression`, and `zig/excessive-as-casts`. All four
-use the same native ownership, counting, threshold, and evidence pipeline. YAML
-is currently an input frontend that compiles to a Badbox-owned rule IR;
+use the same native ownership, counting, threshold, and evidence pipeline. The
+bundled rules use Badbox's Rust-parsed [tiny DSL](native/tiny-dsl/README.md).
+The DSL and the optional YAML frontend both compile to a Badbox-owned rule IR;
 TypeScript does not perform matching or aggregation.
 
 The published npm `0.0.1` is still the earlier scaffold. The native scanner is
@@ -37,16 +38,18 @@ failures, or syntax diagnostics do. There are no CLI flags in this slice.
 
 ## Rule files and API
 
-The two [YAML probes](rules/README.md) define syntax selection, nearest owner
-kinds, counting, thresholds, and evidence labels. The current threshold of
-`> 1` is a probe setting, not a universal engineering recommendation.
+The [tiny DSL](native/tiny-dsl/README.md) defines syntax selection, nearest
+ownership, counting, thresholds, structured reports, and external test fixture
+declarations. The current threshold of `> 1` is a probe setting, not a universal
+engineering recommendation. YAML remains supported as a compatibility frontend.
 
 ```ts
 import { inspect } from "badbox/scanner";
 
 const result = await inspect({
   paths: ["./src"],
-  rulePaths: ["./rules/my-rule.yaml"], // omit to run the bundled probes
+  rulePaths: ["./rules/my-pack"], // file or recursive directory pack
+  parameters: { "rust/excessive-clones.limit": 4 },
   threshold: 2, // optional override of every loaded rule's threshold
   profile: true, // optional phase timings and execution/cache counters
   maxFindings: 1_000, // optional; defaults to 10,000
@@ -60,7 +63,7 @@ In this checkout, import from `./src/scanner/index.ts` instead. The legacy
 `defineRule()` export remains available, but its TypeScript callbacks are not
 executed by this scanner.
 
-One asynchronous native call compiles YAML into the Badbox rule IR, discovers
+One asynchronous native call compiles DSL or YAML rules into the Badbox rule IR, discovers
 files for 30 statically bundled languages, compiles selectors through the
 active structural backend, parses relevant files, assigns nearest owners,
 counts, and returns bounded five-integer records in a native `Uint32Array`.
@@ -102,7 +105,8 @@ findings are sorted after parallel work, preserving deterministic output.
 - Findings are five `u32` values each and are bounded by default while exact
   total and observed counts are retained. Raising `maxFindings` increases the
   native buffer linearly at 20 bytes per returned finding.
-- SQL parsing, cancellation evidence, additional aggregates, and
+- Relational DSL conditions are parsed but rejected explicitly until native
+  relational evaluation exists. SQL parsing, cancellation evidence, additional aggregates, and
   prebuilt native npm packages are not implemented. Rule format version `1` is
   experimental.
 
@@ -114,10 +118,12 @@ bun test
 bun run typecheck
 cargo fmt --manifest-path native/Cargo.toml --check
 cargo clippy --manifest-path native/Cargo.toml --locked --all-targets -- -D warnings
+cargo nextest run --manifest-path native/Cargo.toml
+cargo nextest run --manifest-path native/tiny-dsl/Cargo.toml
 ```
 
 Rebuild after changing Rust. Bun tests exercise the actual native addon, including
-YAML-only changes, cross-language ownership, threshold boundaries, owner byte
+rule-only changes, cross-language ownership, threshold boundaries, owner byte
 ranges, duplicate owners, ignores, and diagnostics. No Zova checkout is required
 for tests.
 
@@ -131,10 +137,11 @@ the [optimization report](benchmarks/OPTIMIZATION.md).
 - `src/cli.ts` — CLI entry point
 - `src/scanner/` — thin native invocation and result types
 - `native/src/rule_ir.rs` — backend- and serialization-independent rule model
-- `native/src/frontends/` — YAML-to-IR compilation
+- `native/tiny-dsl/` — Rust parser, syntax model, tests, and DSL reference
+- `native/src/frontends/` — DSL/YAML-to-IR compilation
 - `native/src/backend/` — structural contract and ast-grep implementation
 - `native/src/evaluator.rs` — language-independent aggregation and evidence
 - `src/rules/` — legacy callback and base finding contracts
 - `src/reporters/` — terminal output and reserved JSON reporter interface
-- `rules/` — YAML capability probes and format documentation
+- `rules/` — bundled DSL capability probes and optional YAML equivalents
 - `tests/` — integration tests and syntax fixtures

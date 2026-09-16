@@ -1,9 +1,13 @@
-# Counting probe format (experimental version 1)
+# Rule frontends (experimental version 1)
 
-Rules are data, not TypeScript callbacks. Rust loads one rule per YAML file.
-YAML is an input frontend: it is validated and compiled into Badbox's
-serialization-independent rule IR before structural matching is compiled. This
-is not arbitrary ast-grep YAML and not a finalized DSL.
+Rules are data, not TypeScript callbacks. The bundled probes use `.badbox` files
+written in the Rust-parsed [tiny DSL](../native/tiny-dsl/README.md). That README
+is the DSL reference.
+
+Badbox also accepts the earlier YAML format as an optional compatibility
+frontend. Both formats are validated and compiled into the same
+serialization-independent Rule IR before structural matching is compiled.
+This YAML is Badbox's schema, not arbitrary ast-grep YAML.
 
 ```yaml
 version: 1
@@ -22,7 +26,7 @@ evidence:
   subject: clone call sites
 ```
 
-The [Go probe](go/excessive-goroutines.yaml) uses the same schema and evaluator,
+The [Go YAML equivalent](go/excessive-goroutines.yaml) uses the same schema and evaluator,
 with `select: { kind: go_statement }` and Go's callable node kinds.
 The [Zig probe](zig/excessive-as-casts.yaml) counts `@as` patterns inside Zig
 function declarations through that same pipeline.
@@ -60,7 +64,8 @@ literal syntax. Lowercase hash capture names are rejected.
   each loaded rule. Zero-count owners cannot exceed a nonnegative threshold
   and are not returned.
 - `severity` is `info`, `warning`, or `error`; it is a label, not an exit policy.
-  `summary` becomes the finding message; `evidence.subject` labels the count.
+  `message`, when provided, becomes the finding message; otherwise `summary` is
+  used. `evidence.subject` labels the count.
   Both must be nonempty. The probe thresholds are illustrative.
 
 ## Results

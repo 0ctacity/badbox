@@ -1,0 +1,14 @@
+badbox 1
+
+rule rust/excessive-clones for rust {
+  summary "Function contains more clone call sites than the configured threshold"
+  param limit = 1
+  find code(value) `value.clone()`
+  group by nearest callable
+  when count > limit
+  report {
+    severity info
+    message "Callable contains more clone call sites than the configured limit"
+    evidence "clone call sites"
+  }
+}

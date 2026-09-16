@@ -1,0 +1,14 @@
+badbox 1
+
+rule go/excessive-goroutines for go {
+  summary "Function contains more goroutine launch sites than the configured threshold"
+  param limit = 1
+  find node go_statement
+  group by nearest callable
+  when count > limit
+  report {
+    severity info
+    message "Callable contains more goroutine launch sites than the configured limit"
+    evidence "goroutine launch sites"
+  }
+}

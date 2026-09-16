@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 pub const DEFAULT_MAX_FINDINGS: u32 = 10_000;
 pub const FINDING_RECORD_WIDTH: u32 = 5;
@@ -129,11 +129,21 @@ pub enum Severity {
 pub struct ScanOptions {
     pub paths: Vec<String>,
     pub rule_paths: Vec<String>,
+    #[serde(default)]
+    pub parameters: BTreeMap<String, ScalarParameter>,
     pub threshold: Option<u32>,
     #[serde(default)]
     pub profile: bool,
     #[serde(default = "default_max_findings")]
     pub max_findings: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ScalarParameter {
+    Integer(u32),
+    Boolean(bool),
+    String(String),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -186,6 +196,7 @@ pub struct RuleMetadata {
     pub id: String,
     pub language: Language,
     pub summary: String,
+    pub message: String,
     pub severity: Severity,
     pub threshold: u32,
     pub evidence_subject: String,

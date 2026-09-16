@@ -1,6 +1,7 @@
 //! Backend- and serialization-independent Badbox rule representation.
 
 use crate::model::{Language, Severity};
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub struct Rule {
@@ -8,11 +9,21 @@ pub struct Rule {
     pub language: Language,
     pub summary: String,
     pub severity: Severity,
+    pub message: String,
+    pub parameters: BTreeMap<String, ParameterValue>,
+    pub threshold_parameter: Option<String>,
     pub selection: StructuralSelection,
     pub scope: Scope,
     pub aggregation: Aggregation,
     pub threshold: Threshold,
     pub evidence: Evidence,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ParameterValue {
+    Integer(u32),
+    Boolean(bool),
+    String(String),
 }
 
 #[derive(Debug)]

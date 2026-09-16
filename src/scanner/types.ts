@@ -45,6 +45,7 @@ export interface RuleMetadata {
   readonly id: string;
   readonly language: ScanLanguage;
   readonly summary: string;
+  readonly message: string;
   readonly severity: ScanSeverity;
   readonly threshold: number;
   readonly evidenceSubject: string;
@@ -54,6 +55,8 @@ export interface InspectOptions {
   readonly paths: readonly string[];
   /** Defaults to the bundled Rust, Go, PowerShell, and Zig capability probes. */
   readonly rulePaths?: readonly string[];
+  /** Rule-local scalar overrides keyed as "namespace/rule.parameter". */
+  readonly parameters?: Readonly<Record<string, string | number | boolean>>;
   /** Overrides each rule's strict greater-than threshold. */
   readonly threshold?: number;
   /** Include diagnostic phase timings and cache/execution counters. */

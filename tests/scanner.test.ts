@@ -32,6 +32,83 @@ afterAll(async () => {
 });
 
 describe("native counting capability probes", () => {
+  test("loads a multi-rule tiny DSL pack through the native engine", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "input.rs");
+    const rules = join(root, "rules");
+    await mkdir(rules);
+    await Bun.write(
+      source,
+      "fn example() { a.clone(); b.clone(); a.unwrap(); b.unwrap(); }",
+    );
+    await Bun.write(join(rules, "rust.badbox"), `
+badbox 1
+
+rule rust/excessive-clones for rust {
+  summary "Function contains multiple clone calls"
+  param limit = 1
+  find code(value) \`value.clone()\`
+  group by nearest callable
+  when count > limit
+  report {
+    severity info
+    message "Callable contains too many clone call sites"
+    evidence "clone call sites"
+  }
+}
+
+rule rust/excessive-unwraps for rust {
+  summary "Function contains multiple unwrap calls"
+  find code(value) \`value.unwrap()\`
+  group by nearest node(function_item, closure_expression)
+  when count > 1
+  report {
+    severity warning
+    message "Callable contains too many unwrap call sites"
+    evidence "unwrap call sites"
+  }
+}
+
+test rust/excessive-clones "reports excessive clones" {
+  input "fixtures/excessive.rs"
+  expect findings 1
+}
+`);
+
+    const result = await inspect({ paths: [source], rulePaths: [rules] });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(records(result).map((finding) => [
+      finding.rule.id,
+      finding.rule.message,
+      finding.observed,
+    ])).toEqual([
+      ["rust/excessive-clones", "Callable contains too many clone call sites", 2],
+      ["rust/excessive-unwraps", "Callable contains too many unwrap call sites", 2],
+    ]);
+
+    const overridden = await inspect({
+      paths: [source],
+      rulePaths: [rules],
+      parameters: { "rust/excessive-clones.limit": 2 },
+    });
+    expect(records(overridden).map((finding) => finding.rule.id)).toEqual([
+      "rust/excessive-unwraps",
+    ]);
+    expect(overridden.rules[0]?.threshold).toBe(2);
+
+    await expect(inspect({
+      paths: [source],
+      rulePaths: [rules],
+      parameters: { "rust/excessive-clones.unknown": 2 },
+    })).rejects.toThrow("unknown parameter");
+    await expect(inspect({
+      paths: [source],
+      rulePaths: [rules],
+      parameters: { "rust/excessive-clones.limit": "two" },
+    })).rejects.toThrow("must be an integer");
+  });
+
   test("Rust, Go, PowerShell, and Zig share compact nearest-owner counting", async () => {
     const result = await inspect({ paths: [fixtureRoot], threshold: 1 });
     const findings = records(result);
