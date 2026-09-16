@@ -1,0 +1,925 @@
+{
+  "version": 1,
+  "repository": "https://github.com/ata-sesli/zova",
+  "revision": "88197842e5a7b2d2477fc4e2c073c1f518817ba1",
+  "annotationMethod": "Whole excerpts inspected by the implementing agent; explicit match strings and Go line boundaries chosen independently of Badbox output. Offsets calculated from those annotations. Not an independent human review.",
+  "cases": [
+    {
+      "file": "database-prepare-owned.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/database.rs",
+        "startLine": 252,
+        "endLine": 264
+      },
+      "sha256": "12ae72187e97e3fa9ea49242e501b58b53b2a15bdc922773531c1aa1ab1c9e71",
+      "owners": [
+        {
+          "name": "prepare_owned",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 609,
+          "text": "pub fn prepare_owned(&mut self, sql: &str) -> Result<OwnedStatement> {\n        let sql = cstring(sql, \"sql\")?;\n        let mut statement = ptr::null_mut();\n        let request = zova_sys::zova_database_prepare_request {\n            db: self.raw_ptr(),\n            sql: sql.as_ptr(),\n            out_statement: &mut statement,\n        };\n        self.status(unsafe { zova_sys::zova_database_prepare(&request) })?;\n        let raw = NonNull::new(statement)\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None))?;\n        Ok(OwnedStatement::new(raw, self.inner.clone()))\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 583,
+              "endByte": 601,
+              "text": "self.inner.clone()"
+            }
+          ]
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 483,
+          "endByte": 543,
+          "text": "|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "database-listen.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/database.rs",
+        "startLine": 379,
+        "endLine": 382
+      },
+      "sha256": "fdfa19bdd9fb126e31a231030c48c3e62c08107d8d3c820adca8742e5a24c3c1",
+      "owners": [
+        {
+          "name": "listen",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 186,
+          "text": "pub fn listen(&mut self, channel: &str) -> Result<Subscription> {\n        let raw = listen_raw(self.raw_ptr(), channel)?;\n        Ok(Subscription::new(raw, self.inner.clone()))\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 160,
+              "endByte": 178,
+              "text": "self.inner.clone()"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "object-writer-owned.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/object.rs",
+        "startLine": 467,
+        "endLine": 482
+      },
+      "sha256": "5c4b5d925320d1575bf90de2f39d7a6b2e6cae6407103ad8ee0daf471324c452",
+      "owners": [
+        {
+          "name": "object_writer_owned",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 661,
+          "text": "pub fn object_writer_owned(&mut self) -> Result<OwnedObjectWriter> {\n        let mut writer = ptr::null_mut();\n        let request = zova_sys::zova_object_writer_create_request {\n            db: self.raw_ptr(),\n            out_writer: &mut writer,\n        };\n        self.status(unsafe { zova_sys::zova_object_writer_create(&request) })?;\n        let raw = NonNull::new(writer)\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None))?;\n        Ok(OwnedObjectWriter {\n            raw: Some(raw),\n            db: self.raw_ptr(),\n            _database: self.inner.clone(),\n            _not_send_sync: PhantomData,\n        })\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 584,
+              "endByte": 602,
+              "text": "self.inner.clone()"
+            }
+          ]
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 406,
+          "endByte": 466,
+          "text": "|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "object-writer-owned-options.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/object.rs",
+        "startLine": 486,
+        "endLine": 505
+      },
+      "sha256": "58dd18e49c83c3faddd8da9ea15828487238b5bc489a67e08950b2dbcbb33d2c",
+      "owners": [
+        {
+          "name": "object_writer_owned_with_options",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 789,
+          "text": "pub fn object_writer_owned_with_options(\n        &mut self,\n        options: ObjectPutOptions,\n    ) -> Result<OwnedObjectWriter> {\n        let mut writer = ptr::null_mut();\n        let request = zova_sys::zova_object_writer_create_with_options_request {\n            db: self.raw_ptr(),\n            options: options.to_raw(),\n            out_writer: &mut writer,\n        };\n        self.status(unsafe { zova_sys::zova_object_writer_create_with_options(&request) })?;\n        let raw = NonNull::new(writer)\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None))?;\n        Ok(OwnedObjectWriter {\n            raw: Some(raw),\n            db: self.raw_ptr(),\n            _database: self.inner.clone(),\n            _not_send_sync: PhantomData,\n        })\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 712,
+              "endByte": 730,
+              "text": "self.inner.clone()"
+            }
+          ]
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 534,
+          "endByte": 594,
+          "text": "|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "object-reader-owned.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/object.rs",
+        "startLine": 530,
+        "endLine": 546
+      },
+      "sha256": "e626e046effd44a735d54a94b48b634b8c476c23b8df47eb3e154a0038ceda68",
+      "owners": [
+        {
+          "name": "object_reader_owned",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 702,
+          "text": "pub fn object_reader_owned(&mut self, id: ObjectId) -> Result<OwnedObjectReader> {\n        let mut reader = ptr::null_mut();\n        let request = zova_sys::zova_object_reader_create_request {\n            db: self.raw_ptr(),\n            id: id.to_c(),\n            out_reader: &mut reader,\n        };\n        self.status(unsafe { zova_sys::zova_object_reader_create(&request) })?;\n        let raw = NonNull::new(reader)\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None))?;\n        Ok(OwnedObjectReader {\n            raw: Some(raw),\n            db: self.raw_ptr(),\n            _database: self.inner.clone(),\n            _not_send_sync: PhantomData,\n        })\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 625,
+              "endByte": 643,
+              "text": "self.inner.clone()"
+            }
+          ]
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 447,
+          "endByte": 507,
+          "text": "|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "shared-prepare.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 233,
+        "endLine": 251
+      },
+      "sha256": "74561eaf90fb5421a738fa9fe99d62b3e407f2625d53335e78de569c68259628",
+      "owners": [
+        {
+          "name": "prepare",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 761,
+          "text": "pub fn prepare(&self, sql: &str) -> Result<SharedStatement> {\n        let sql = cstring(sql, \"sql\")?;\n        let _guard = self.inner.lock();\n        let mut statement = ptr::null_mut();\n        let request = zova_sys::zova_database_prepare_request {\n            db: self.inner.raw_ptr(),\n            sql: sql.as_ptr(),\n            out_statement: &mut statement,\n        };\n        self.inner\n            .status_locked(unsafe { zova_sys::zova_database_prepare(&request) })?;\n        let raw = NonNull::new(statement)\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None))?;\n        Ok(SharedStatement {\n            raw: Some(raw),\n            database: self.inner.clone(),\n            _not_sync: PhantomData,\n        })\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 689,
+              "endByte": 707,
+              "text": "self.inner.clone()"
+            }
+          ]
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 546,
+          "endByte": 606,
+          "text": "|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "shared-listen.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 294,
+        "endLine": 302
+      },
+      "sha256": "6a85b554950063c180c8d0e14550dd39295053d42cff99dd15981b59ded8f4bf",
+      "owners": [
+        {
+          "name": "listen",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 328,
+          "text": "pub fn listen(&self, channel: &str) -> Result<SharedSubscription> {\n        let _guard = self.inner.lock();\n        let raw = listen_raw(self.inner.raw_ptr(), channel)?;\n        Ok(SharedSubscription {\n            raw: Some(raw),\n            database: self.inner.clone(),\n            _not_sync: PhantomData,\n        })\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 256,
+              "endByte": 274,
+              "text": "self.inner.clone()"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "shared-writer.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 678,
+        "endLine": 694
+      },
+      "sha256": "153d505944007a5c73146f262e991ea0b77a593bd4ed0ba73b5d1c447a88827d",
+      "owners": [
+        {
+          "name": "object_writer",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 687,
+          "text": "pub fn object_writer(&self) -> Result<SharedObjectWriter> {\n        let _guard = self.inner.lock();\n        let mut writer = ptr::null_mut();\n        let request = zova_sys::zova_object_writer_create_request {\n            db: self.inner.raw_ptr(),\n            out_writer: &mut writer,\n        };\n        self.inner\n            .status_locked(unsafe { zova_sys::zova_object_writer_create(&request) })?;\n        let raw = NonNull::new(writer)\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None))?;\n        Ok(SharedObjectWriter {\n            raw: Some(raw),\n            database: self.inner.clone(),\n            _not_sync: PhantomData,\n        })\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 615,
+              "endByte": 633,
+              "text": "self.inner.clone()"
+            }
+          ]
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 469,
+          "endByte": 529,
+          "text": "|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "shared-writer-options.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 696,
+        "endLine": 716
+      },
+      "sha256": "2e652265ac7263c56ab1369116da465fb886381d5b0e401ae8845b4bd060e772",
+      "owners": [
+        {
+          "name": "object_writer_with_options",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 815,
+          "text": "pub fn object_writer_with_options(\n        &self,\n        options: ObjectPutOptions,\n    ) -> Result<SharedObjectWriter> {\n        let _guard = self.inner.lock();\n        let mut writer = ptr::null_mut();\n        let request = zova_sys::zova_object_writer_create_with_options_request {\n            db: self.inner.raw_ptr(),\n            options: options.to_raw(),\n            out_writer: &mut writer,\n        };\n        self.inner\n            .status_locked(unsafe { zova_sys::zova_object_writer_create_with_options(&request) })?;\n        let raw = NonNull::new(writer)\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None))?;\n        Ok(SharedObjectWriter {\n            raw: Some(raw),\n            database: self.inner.clone(),\n            _not_sync: PhantomData,\n        })\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 743,
+              "endByte": 761,
+              "text": "self.inner.clone()"
+            }
+          ]
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 597,
+          "endByte": 657,
+          "text": "|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "shared-reader.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 718,
+        "endLine": 735
+      },
+      "sha256": "980befc51ae0d2ad852a33afc64902139e5c4c9c0f485b3a0c59827c74fd9021",
+      "owners": [
+        {
+          "name": "object_reader",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 728,
+          "text": "pub fn object_reader(&self, id: ObjectId) -> Result<SharedObjectReader> {\n        let _guard = self.inner.lock();\n        let mut reader = ptr::null_mut();\n        let request = zova_sys::zova_object_reader_create_request {\n            db: self.inner.raw_ptr(),\n            id: id.to_c(),\n            out_reader: &mut reader,\n        };\n        self.inner\n            .status_locked(unsafe { zova_sys::zova_object_reader_create(&request) })?;\n        let raw = NonNull::new(reader)\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None))?;\n        Ok(SharedObjectReader {\n            raw: Some(raw),\n            database: self.inner.clone(),\n            _not_sync: PhantomData,\n        })\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 656,
+              "endByte": 674,
+              "text": "self.inner.clone()"
+            }
+          ]
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 510,
+          "endByte": 570,
+          "text": "|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "writer-write.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 1992,
+        "endLine": 2002
+      },
+      "sha256": "29ae4ce1ffe250d1d76acfa173adb27675ec33dfa506aa799ccaed5aa4a921d2",
+      "owners": [
+        {
+          "name": "write",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 442,
+          "text": "pub fn write(&mut self, bytes: &[u8]) -> Result<()> {\n        let raw = self.raw()?;\n        let database = self.database.clone();\n        let _guard = database.lock();\n        let request = zova_sys::zova_object_writer_write_request {\n            writer: raw.as_ptr(),\n            data: bytes.as_ptr(),\n            len: bytes.len(),\n        };\n        database.status_locked(unsafe { zova_sys::zova_object_writer_write(&request) })\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 112,
+              "endByte": 133,
+              "text": "self.database.clone()"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "writer-finish.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 2004,
+        "endLine": 2016
+      },
+      "sha256": "c05fcff42e9e871b4f88e9b9fafeb4dfd16c349a2fbb727acf5efc7aec04318c",
+      "owners": [
+        {
+          "name": "finish",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 536,
+          "text": "pub fn finish(mut self) -> Result<ObjectId> {\n        let raw = self.raw()?;\n        let database = self.database.clone();\n        let _guard = database.lock();\n        let mut out = zova_sys::zova_object_id { bytes: [0; 32] };\n        let request = zova_sys::zova_object_writer_finish_request {\n            writer: raw.as_ptr(),\n            out_id: &mut out,\n        };\n        database.status_locked(unsafe { zova_sys::zova_object_writer_finish(&request) })?;\n        self.destroy_locked();\n        Ok(from_c_object_id(out))\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 104,
+              "endByte": 125,
+              "text": "self.database.clone()"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "writer-cancel.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 2018,
+        "endLine": 2028
+      },
+      "sha256": "46b6aa29460ee67b1b2ecafd760e3c60703bfa2240a921df65cd7bf9ca7920cb",
+      "owners": [
+        {
+          "name": "cancel",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 414,
+          "text": "pub fn cancel(mut self) -> Result<()> {\n        let raw = self.raw()?;\n        let database = self.database.clone();\n        let _guard = database.lock();\n        let request = zova_sys::zova_object_writer_cancel_request {\n            writer: raw.as_ptr(),\n        };\n        database.status_locked(unsafe { zova_sys::zova_object_writer_cancel(&request) })?;\n        self.destroy_locked();\n        Ok(())\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 98,
+              "endByte": 119,
+              "text": "self.database.clone()"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "writer-destroy.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 2043,
+        "endLine": 2050
+      },
+      "sha256": "75fe6e48340916ac9080b12c7ca723fa6f18336530e2045881900a0597e86523",
+      "owners": [
+        {
+          "name": "destroy",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 210,
+          "text": "fn destroy(&mut self) {\n        if self.raw.is_none() {\n            return;\n        }\n        let database = self.database.clone();\n        let _guard = database.lock();\n        self.destroy_locked();\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 113,
+              "endByte": 134,
+              "text": "self.database.clone()"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "reader-read.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 2054,
+        "endLine": 2067
+      },
+      "sha256": "bf4dde1b207debe917fad71abc12db3fde5c36b6693d5a5bceca60606696421a",
+      "owners": [
+        {
+          "name": "read",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 540,
+          "text": "pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {\n        let raw = self.raw()?;\n        let database = self.database.clone();\n        let _guard = database.lock();\n        let mut read = 0;\n        let request = zova_sys::zova_object_reader_read_request {\n            reader: raw.as_ptr(),\n            buffer: buffer.as_mut_ptr(),\n            buffer_len: buffer.len(),\n            out_read: &mut read,\n        };\n        database.status_locked(unsafe { zova_sys::zova_object_reader_read(&request) })?;\n        Ok(read)\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 119,
+              "endByte": 140,
+              "text": "self.database.clone()"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "reader-close.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 2069,
+        "endLine": 2076
+      },
+      "sha256": "644147df24c3d44770658f45b75604fa0fde320c735ec1a97ab1e07b3d3497d8",
+      "owners": [
+        {
+          "name": "close",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 236,
+          "text": "pub fn close(&mut self) -> Result<()> {\n        if self.raw.is_none() {\n            return Ok(());\n        }\n        let database = self.database.clone();\n        let _guard = database.lock();\n        self.destroy_locked(true)\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 136,
+              "endByte": 157,
+              "text": "self.database.clone()"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "reader-destroy.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 2103,
+        "endLine": 2110
+      },
+      "sha256": "6ac7bf8284b723ae78923a1f5b8ab85f133d6c283adf12763242a608a7869d56",
+      "owners": [
+        {
+          "name": "destroy",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 223,
+          "text": "fn destroy(&mut self) {\n        if self.raw.is_none() {\n            return;\n        }\n        let database = self.database.clone();\n        let _guard = database.lock();\n        let _ = self.destroy_locked(false);\n    }",
+          "count": 1,
+          "ranges": [
+            {
+              "startByte": 113,
+              "endByte": 134,
+              "text": "self.database.clone()"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "database-exec.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/database.rs",
+        "startLine": 229,
+        "endLine": 236
+      },
+      "sha256": "84581b1ca1951404de77cb0fd805004161f7e3426ec6f5339535d61e292ad846",
+      "owners": [
+        {
+          "name": "exec",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 305,
+          "text": "pub fn exec(&mut self, sql: &str) -> Result<()> {\n        let sql = cstring(sql, \"sql\")?;\n        let request = zova_sys::zova_database_exec_request {\n            db: self.raw_ptr(),\n            sql: sql.as_ptr(),\n        };\n        self.status(unsafe { zova_sys::zova_database_exec(&request) })\n    }",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "database-prepare-borrowed.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/database.rs",
+        "startLine": 238,
+        "endLine": 250
+      },
+      "sha256": "f4a26f78c940674d993be90a0ab452a77e0f4e108c1ce6ddcd0f3f0fc97fd2a0",
+      "owners": [
+        {
+          "name": "prepare",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 593,
+          "text": "pub fn prepare(&mut self, sql: &str) -> Result<Statement<'_>> {\n        let sql = cstring(sql, \"sql\")?;\n        let mut statement = ptr::null_mut();\n        let request = zova_sys::zova_database_prepare_request {\n            db: self.raw_ptr(),\n            sql: sql.as_ptr(),\n            out_statement: &mut statement,\n        };\n        self.status(unsafe { zova_sys::zova_database_prepare(&request) })?;\n        let raw = NonNull::new(statement)\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None))?;\n        Ok(Statement::new(raw, self.raw_ptr()))\n    }",
+          "count": 0,
+          "ranges": []
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 476,
+          "endByte": 536,
+          "text": "|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "database-kv-get.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/database.rs",
+        "startLine": 267,
+        "endLine": 271
+      },
+      "sha256": "7973ddc29990d3aee0c8f62d91542c214b1f0f981bcf5cec0a0b6061ce00e73b",
+      "owners": [
+        {
+          "name": "kv_get",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 224,
+          "text": "pub fn kv_get(&mut self, namespace: &[u8], key: &[u8]) -> Result<Option<Vec<u8>>> {\n        let db = self.raw_ptr();\n        let status = |status| self.status(status);\n        kv_get_raw(db, status, namespace, key)\n    }",
+          "count": 0,
+          "ranges": []
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 142,
+          "endByte": 170,
+          "text": "|status| self.status(status)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "database-kv-get-many.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/database.rs",
+        "startLine": 275,
+        "endLine": 283
+      },
+      "sha256": "a40125affc649e6390788f072f73ebc5a5f35a05763b5682bdf025dfdd995a11",
+      "owners": [
+        {
+          "name": "kv_get_many",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 275,
+          "text": "pub fn kv_get_many(\n        &mut self,\n        namespace: &[u8],\n        keys: &[&[u8]],\n    ) -> Result<Vec<Option<Vec<u8>>>> {\n        let db = self.raw_ptr();\n        let status = |status| self.status(status);\n        kv_get_many_raw(db, status, namespace, keys)\n    }",
+          "count": 0,
+          "ranges": []
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 187,
+          "endByte": 215,
+          "text": "|status| self.status(status)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "database-kv-put.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/database.rs",
+        "startLine": 286,
+        "endLine": 290
+      },
+      "sha256": "a915b661be90f857073748cfba89188e64b9928ac0778b70e5e49638ae8dc898",
+      "owners": [
+        {
+          "name": "kv_put",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 232,
+          "text": "pub fn kv_put(&mut self, namespace: &[u8], key: &[u8], value: &[u8]) -> Result<()> {\n        let db = self.raw_ptr();\n        let status = |status| self.status(status);\n        kv_put_raw(db, status, namespace, key, value)\n    }",
+          "count": 0,
+          "ranges": []
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 143,
+          "endByte": 171,
+          "text": "|status| self.status(status)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "object-reader-borrowed.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/object.rs",
+        "startLine": 511,
+        "endLine": 527
+      },
+      "sha256": "e1cf8df35867a22b5948abd0974fec19e204e61ae9ab54a2027c4620098d5450",
+      "owners": [
+        {
+          "name": "object_reader",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 683,
+          "text": "pub fn object_reader(&mut self, id: ObjectId) -> Result<ObjectReader<'_>> {\n        let mut reader = ptr::null_mut();\n        let request = zova_sys::zova_object_reader_create_request {\n            db: self.raw_ptr(),\n            id: id.to_c(),\n            out_reader: &mut reader,\n        };\n        self.status(unsafe { zova_sys::zova_object_reader_create(&request) })?;\n        let raw = NonNull::new(reader)\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None))?;\n        Ok(ObjectReader {\n            raw: Some(raw),\n            db: self.raw_ptr(),\n            _database: PhantomData,\n            _not_send_sync: PhantomData,\n        })\n    }",
+          "count": 0,
+          "ranges": []
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 440,
+          "endByte": 500,
+          "text": "|| Error::from_status(zova_sys::ZOVA_INVALID_ARGUMENT, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "writer-raw.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 2030,
+        "endLine": 2033
+      },
+      "sha256": "063771dca118449e199956144eb0f92a2fc3ac0cac5e64098081fbfbff0898a6",
+      "owners": [
+        {
+          "name": "raw",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 181,
+          "text": "fn raw(&self) -> Result<NonNull<zova_sys::zova_object_writer>> {\n        self.raw\n            .ok_or_else(|| Error::from_status(zova_sys::ZOVA_OBJECT_WRITER_CLOSED, None))\n    }",
+          "count": 0,
+          "ranges": []
+        },
+        {
+          "name": null,
+          "kind": "closure_expression",
+          "startByte": 110,
+          "endByte": 174,
+          "text": "|| Error::from_status(zova_sys::ZOVA_OBJECT_WRITER_CLOSED, None)",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "writer-destroy-locked.rs",
+      "language": "rust",
+      "ruleId": "rust/excessive-clones",
+      "origin": {
+        "path": "bindings/rust/zova/src/shared.rs",
+        "startLine": 2035,
+        "endLine": 2041
+      },
+      "sha256": "465b61f044a26086e525efee9e677c3e98f22de1a54217fbb466e815371002e1",
+      "owners": [
+        {
+          "name": "destroy_locked",
+          "kind": "function_item",
+          "startByte": 4,
+          "endByte": 206,
+          "text": "fn destroy_locked(&mut self) {\n        if let Some(raw) = self.raw.take() {\n            unsafe {\n                let _ = zova_sys::zova_object_writer_destroy(raw.as_ptr());\n            }\n        }\n    }",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "go-concurrency.go",
+      "language": "go",
+      "ruleId": "go/excessive-goroutines",
+      "origin": {
+        "path": "bindings/go/zova_test.go",
+        "startLine": 578,
+        "endLine": 672
+      },
+      "sha256": "971a958025de22d2633b72607a7da981785f72ce2d661afaf037b39187905b5a",
+      "owners": [
+        {
+          "name": "TestConcurrentOneDBCallsAndCopiedDiagnostics",
+          "kind": "function_declaration",
+          "startByte": 14,
+          "endByte": 2157,
+          "text": "func TestConcurrentOneDBCallsAndCopiedDiagnostics(t *testing.T) {\n\tdb, err := Create(tempZovaPath(t, \"concurrent\"))\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tdefer db.Close()\n\n\tmust(t, db.Exec(\"create table events(id integer primary key, worker integer not null, seq integer not null)\"))\n\n\tconst workerCount = 6\n\tconst insertsPerWorker = 12\n\terrs := make(chan error, workerCount)\n\tvar wg sync.WaitGroup\n\tfor worker := 0; worker < workerCount; worker++ {\n\t\tworker := worker\n\t\twg.Add(1)\n\t\tgo func() {\n\t\t\tdefer wg.Done()\n\t\t\tfor seq := 0; seq < insertsPerWorker; seq++ {\n\t\t\t\tif err := db.Exec(fmt.Sprintf(\n\t\t\t\t\t\"insert into events(worker, seq) values (%d, %d)\",\n\t\t\t\t\tworker,\n\t\t\t\t\tseq,\n\t\t\t\t)); err != nil {\n\t\t\t\t\terrs <- err\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n\t\t}()\n\t}\n\twg.Wait()\n\tclose(errs)\n\tfor err := range errs {\n\t\tif err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t}\n\tif got := scalarInt(t, db, \"select count(*) from events\"); got != workerCount*insertsPerWorker {\n\t\tt.Fatalf(\"concurrent insert count = %d\", got)\n\t}\n\n\tstmt, err := db.Prepare(\"select id as event_id, worker from events\")\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tdefer stmt.Close()\n\n\terrs = make(chan error, workerCount)\n\tfor worker := 0; worker < workerCount; worker++ {\n\t\twg.Add(1)\n\t\tgo func() {\n\t\t\tdefer wg.Done()\n\t\t\tfor i := 0; i < 50; i++ {\n\t\t\t\tcount, err := stmt.ColumnCount()\n\t\t\t\tif err != nil {\n\t\t\t\t\terrs <- err\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tif count != 2 {\n\t\t\t\t\terrs <- fmt.Errorf(\"column count = %d\", count)\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tname, err := stmt.ColumnName(0)\n\t\t\t\tif err != nil {\n\t\t\t\t\terrs <- err\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tif name != \"event_id\" {\n\t\t\t\t\terrs <- fmt.Errorf(\"column name = %q\", name)\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n\t\t}()\n\t}\n\twg.Wait()\n\tclose(errs)\n\tfor err := range errs {\n\t\tif err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t}\n\n\terr = db.Exec(\"select * from no_such_table\")\n\tif err == nil {\n\t\tt.Fatal(\"missing table query succeeded\")\n\t}\n\tcopied := err.Error()\n\tif !strings.Contains(copied, \"no_such_table\") {\n\t\tt.Fatalf(\"diagnostic = %q\", copied)\n\t}\n\tmust(t, db.Exec(\"create table after_error(id integer)\"))\n\tif !strings.Contains(err.Error(), \"no_such_table\") {\n\t\tt.Fatalf(\"diagnostic was not copied: %q\", err.Error())\n\t}\n}",
+          "count": 2,
+          "ranges": [
+            {
+              "startByte": 495,
+              "endByte": 755,
+              "text": "go func() {\n\t\t\tdefer wg.Done()\n\t\t\tfor seq := 0; seq < insertsPerWorker; seq++ {\n\t\t\t\tif err := db.Exec(fmt.Sprintf(\n\t\t\t\t\t\"insert into events(worker, seq) values (%d, %d)\",\n\t\t\t\t\tworker,\n\t\t\t\t\tseq,\n\t\t\t\t)); err != nil {\n\t\t\t\t\terrs <- err\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n\t\t}()"
+            },
+            {
+              "startByte": 1228,
+              "endByte": 1667,
+              "text": "go func() {\n\t\t\tdefer wg.Done()\n\t\t\tfor i := 0; i < 50; i++ {\n\t\t\t\tcount, err := stmt.ColumnCount()\n\t\t\t\tif err != nil {\n\t\t\t\t\terrs <- err\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tif count != 2 {\n\t\t\t\t\terrs <- fmt.Errorf(\"column count = %d\", count)\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tname, err := stmt.ColumnName(0)\n\t\t\t\tif err != nil {\n\t\t\t\t\terrs <- err\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tif name != \"event_id\" {\n\t\t\t\t\terrs <- fmt.Errorf(\"column name = %q\", name)\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n\t\t}()"
+            }
+          ]
+        },
+        {
+          "name": null,
+          "kind": "func_literal",
+          "startByte": 498,
+          "endByte": 753,
+          "text": "func() {\n\t\t\tdefer wg.Done()\n\t\t\tfor seq := 0; seq < insertsPerWorker; seq++ {\n\t\t\t\tif err := db.Exec(fmt.Sprintf(\n\t\t\t\t\t\"insert into events(worker, seq) values (%d, %d)\",\n\t\t\t\t\tworker,\n\t\t\t\t\tseq,\n\t\t\t\t)); err != nil {\n\t\t\t\t\terrs <- err\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n\t\t}",
+          "count": 0,
+          "ranges": []
+        },
+        {
+          "name": null,
+          "kind": "func_literal",
+          "startByte": 1231,
+          "endByte": 1665,
+          "text": "func() {\n\t\t\tdefer wg.Done()\n\t\t\tfor i := 0; i < 50; i++ {\n\t\t\t\tcount, err := stmt.ColumnCount()\n\t\t\t\tif err != nil {\n\t\t\t\t\terrs <- err\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tif count != 2 {\n\t\t\t\t\terrs <- fmt.Errorf(\"column count = %d\", count)\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tname, err := stmt.ColumnName(0)\n\t\t\t\tif err != nil {\n\t\t\t\t\terrs <- err\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tif name != \"event_id\" {\n\t\t\t\t\terrs <- fmt.Errorf(\"column name = %q\", name)\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n\t\t}",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "go-path.go",
+      "language": "go",
+      "ruleId": "go/excessive-goroutines",
+      "origin": {
+        "path": "bindings/go/zova_test.go",
+        "startLine": 16,
+        "endLine": 19
+      },
+      "sha256": "f443fa9c59b2eba1878714cb3572a02207086c8aa383a59622a4ea241ae60343",
+      "owners": [
+        {
+          "name": "tempZovaPath",
+          "kind": "function_declaration",
+          "startByte": 14,
+          "endByte": 130,
+          "text": "func tempZovaPath(t *testing.T, name string) string {\n\tt.Helper()\n\treturn filepath.Join(t.TempDir(), name+\".zova\")\n}",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "go-abi.go",
+      "language": "go",
+      "ruleId": "go/excessive-goroutines",
+      "origin": {
+        "path": "bindings/go/zova_test.go",
+        "startLine": 21,
+        "endLine": 35
+      },
+      "sha256": "6256238e6e1343c824c8e341f334bf635c723a34232062f2a19b118482490c1c",
+      "owners": [
+        {
+          "name": "TestABIVersionAndStatusNames",
+          "kind": "function_declaration",
+          "startByte": 14,
+          "endByte": 580,
+          "text": "func TestABIVersionAndStatusNames(t *testing.T) {\n\tmajor, minor, patch := ABIVersionNumbers()\n\tif major != 1 || minor != 0 || patch != 0 {\n\t\tt.Fatalf(\"unexpected ABI version: %d.%d.%d\", major, minor, patch)\n\t}\n\tif got := ABIVersion(); got != \"1.0.0-rc.1\" {\n\t\tt.Fatalf(\"unexpected ABI version string: %q\", got)\n\t}\n\tif got := StatusName(StatusOK); got != \"ZOVA_OK\" {\n\t\tt.Fatalf(\"unexpected OK status name: %q\", got)\n\t}\n\tif got := StatusName(StatusExtensionUnavailable); got != \"ZOVA_EXTENSION_UNAVAILABLE\" {\n\t\tt.Fatalf(\"unexpected extension status name: %q\", got)\n\t}\n}",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "go-backup.go",
+      "language": "go",
+      "ruleId": "go/excessive-goroutines",
+      "origin": {
+        "path": "bindings/go/zova_test.go",
+        "startLine": 376,
+        "endLine": 423
+      },
+      "sha256": "e2bc4849188eccfb72ba8650694648c2879fdd73b4c47a0b7a37daf8e367e741",
+      "owners": [
+        {
+          "name": "TestBackupCompactAndRestore",
+          "kind": "function_declaration",
+          "startByte": 14,
+          "endByte": 2018,
+          "text": "func TestBackupCompactAndRestore(t *testing.T) {\n\tsource := tempZovaPath(t, \"ops-source\")\n\tbackup := tempZovaPath(t, \"ops-backup\")\n\tcompact := tempZovaPath(t, \"ops-compact\")\n\trestored := tempZovaPath(t, \"ops-restored\")\n\tnoVerify := tempZovaPath(t, \"ops-no-verify\")\n\tdb, err := Create(source)\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tdefer db.Close()\n\n\tmust(t, db.Exec(\"create table records(id integer primary key, body text not null)\"))\n\tmust(t, db.Exec(\"insert into records(body) values ('kept')\"))\n\tobjectID, err := db.PutObject([]byte(\"go operational object bytes\"))\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tmust(t, db.CreateVectorCollection(\"chunks\", VectorCollectionOptions{\n\t\tDimensions:  2,\n\t\tMetric:      VectorMetricL2,\n\t\tElementType: VectorElementTypeF32,\n\t}))\n\tmust(t, db.PutVector(\"chunks\", \"near\", VectorValues{ElementType: VectorElementTypeF32, F32: []float32{0, 0}}))\n\tmust(t, db.PutVector(\"chunks\", \"far\", VectorValues{ElementType: VectorElementTypeF32, F32: []float32{10, 0}}))\n\n\tmust(t, db.BackupTo(backup))\n\tmust(t, db.CompactTo(compact))\n\tmust(t, db.BackupTo(noVerify, BackupOptions{NoVerify: true}))\n\tif err := db.BackupTo(backup); !errorStatusIs(err, StatusDestinationExists) {\n\t\tt.Fatalf(\"backup destination conflict = %v, want StatusDestinationExists\", err)\n\t}\n\tif err := db.CompactTo(\"bad-destination.db\"); !errorStatusIs(err, StatusNotZovaPath) {\n\t\tt.Fatalf(\"compact bad destination = %v, want StatusNotZovaPath\", err)\n\t}\n\tif err := db.BackupTo(tempZovaPath(t, \"too-many-options\"), BackupOptions{}, BackupOptions{}); !errorStatusIs(err, StatusInvalidArgument) {\n\t\tt.Fatalf(\"too many backup options = %v, want StatusInvalidArgument\", err)\n\t}\n\n\tmust(t, RestoreBackup(backup, restored))\n\tif err := RestoreBackup(\"bad-source.db\", tempZovaPath(t, \"bad-restore\")); !errorStatusIs(err, StatusNotZovaPath) {\n\t\tt.Fatalf(\"restore bad source = %v, want StatusNotZovaPath\", err)\n\t}\n\n\tfor _, path := range []string{backup, compact, restored, noVerify} {\n\t\tverifyOperationalCopy(t, path, objectID)\n\t}\n}",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    },
+    {
+      "file": "go-object-id.go",
+      "language": "go",
+      "ruleId": "go/excessive-goroutines",
+      "origin": {
+        "path": "bindings/go/object_test.go",
+        "startLine": 11,
+        "endLine": 21
+      },
+      "sha256": "14a3096348d337337124e12967336c2fc651a32384656b9217d1db5a8df1593f",
+      "owners": [
+        {
+          "name": "TestObjectIDHelpersAreSHA256Identities",
+          "kind": "function_declaration",
+          "startByte": 14,
+          "endByte": 468,
+          "text": "func TestObjectIDHelpersAreSHA256Identities(t *testing.T) {\n\tobjectID := ObjectIDFor([]byte(\"abc\"))\n\tchunkID := ObjectChunkIDFor([]byte(\"abc\"))\n\tconst want = \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n\tif got := hex.EncodeToString(objectID[:]); got != want {\n\t\tt.Fatalf(\"ObjectIDFor = %s, want %s\", got, want)\n\t}\n\tif got := hex.EncodeToString(chunkID[:]); got != want {\n\t\tt.Fatalf(\"ObjectChunkIDFor = %s, want %s\", got, want)\n\t}\n}",
+          "count": 0,
+          "ranges": []
+        }
+      ]
+    }
+  ]
+}

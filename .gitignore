@@ -32,3 +32,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# local native engine build
+native/target/
+native/build/
+
+# local benchmark output
+benchmarks/results/

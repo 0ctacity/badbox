@@ -1,0 +1,15 @@
+version: 1
+id: rust/excessive-clones
+language: rust
+summary: Function contains more clone call sites than the configured threshold
+severity: info
+select:
+  pattern: $VALUE.clone()
+owner:
+  nearest: [function_item, closure_expression]
+aggregate: count
+# Probe default, not a universal engineering limit.
+threshold:
+  gt: 1
+evidence:
+  subject: clone call sites

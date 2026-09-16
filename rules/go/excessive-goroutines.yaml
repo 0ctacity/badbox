@@ -1,0 +1,15 @@
+version: 1
+id: go/excessive-goroutines
+language: go
+summary: Function contains more goroutine launch sites than the configured threshold
+severity: info
+select:
+  kind: go_statement
+owner:
+  nearest: [function_declaration, method_declaration, func_literal]
+aggregate: count
+# Counts syntax sites, not runtime launches. Probe default only.
+threshold:
+  gt: 1
+evidence:
+  subject: goroutine launch sites
