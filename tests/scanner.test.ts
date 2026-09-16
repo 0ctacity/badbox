@@ -8,6 +8,10 @@ import { inspect, iterateFindings, type FindingRecord, type ScanResult } from ".
 const fixtureRoot = fileURLToPath(new URL("./fixtures/counts", import.meta.url));
 const rustRulePath = fileURLToPath(new URL("../rules/rust/excessive-clones.yaml", import.meta.url));
 const goRulePath = fileURLToPath(new URL("../rules/go/excessive-goroutines.yaml", import.meta.url));
+const powershellRulePath = fileURLToPath(new URL(
+  "../rules/powershell/excessive-invoke-expression.yaml", import.meta.url,
+));
+const zigRulePath = fileURLToPath(new URL("../rules/zig/excessive-as-casts.yaml", import.meta.url));
 const temporaryRoots: string[] = [];
 
 const records = (result: ScanResult) => [...iterateFindings(result)];
@@ -28,21 +32,110 @@ afterAll(async () => {
 });
 
 describe("native counting capability probes", () => {
-  test("Rust and Go share compact nearest-owner counting", async () => {
+  test("Rust, Go, PowerShell, and Zig share compact nearest-owner counting", async () => {
     const result = await inspect({ paths: [fixtureRoot], threshold: 1 });
     const findings = records(result);
-    expect(result.languages).toEqual(["go", "rust"]);
-    expect(result.scannedFiles).toBe(2);
+    expect(result.languages).toEqual(["go", "powershell", "rust", "zig"]);
+    expect(result.scannedFiles).toBe(4);
     expect(result.diagnostics).toEqual([]);
-    expect(result.findingCount).toBe(7);
-    expect(findings).toHaveLength(7);
+    expect(result.findingCount).toBe(9);
+    expect(findings).toHaveLength(9);
     expect(findings.filter((finding) => finding.rule.language === "rust")).toHaveLength(4);
     expect(findings.filter((finding) => finding.rule.language === "go")).toHaveLength(3);
+    expect(findings.filter((finding) => finding.rule.language === "powershell")).toHaveLength(1);
+    expect(findings.filter((finding) => finding.rule.language === "zig")).toHaveLength(1);
     for (const finding of findings) {
       expect(finding.observed).toBe(2);
       expect(finding.ownerStart).toBeLessThan(finding.ownerEnd);
       expect((await ownerText(finding)).length).toBeGreaterThan(0);
     }
+  });
+
+  test("a built-in ast-grep language outside the original Rust and Go pair scans end to end", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "input.py");
+    const rule = join(root, "python.yaml");
+    await Bun.write(source, [
+      "def example():",
+      '    print("first")',
+      '    print("second")',
+      "",
+    ].join("\n"));
+    await Bun.write(rule, [
+      "version: 1",
+      "id: python/excessive-prints",
+      "language: python",
+      "summary: Function contains multiple print calls",
+      "severity: info",
+      "select:",
+      "  pattern: print($VALUE)",
+      "owner:",
+      "  nearest: [function_definition]",
+      "aggregate: count",
+      "threshold:",
+      "  gt: 1",
+      "evidence:",
+      "  subject: print call sites",
+      "",
+    ].join("\n"));
+
+    const result = await inspect({ paths: [source], rulePaths: [rule] });
+    expect(result.languages).toEqual(["python"]);
+    expect(result.scannedFiles).toBe(1);
+    expect(result.diagnostics).toEqual([]);
+    expect(records(result).map((finding) => [finding.rule.language, finding.observed]))
+      .toEqual([["python", 2]]);
+  });
+
+  test("Zig uses the generic nearest-owner counting pipeline", async () => {
+    const source = join(fixtureRoot, "sample.zig");
+    const result = await inspect({ paths: [source], rulePaths: [zigRulePath] });
+    const repeated = await inspect({ paths: [source], rulePaths: [zigRulePath] });
+    const findings = records(result);
+
+    expect(result.languages).toEqual(["zig"]);
+    expect(result.scannedFiles).toBe(1);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.findingCount).toBe(1);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.rule.id).toBe("zig/excessive-as-casts");
+    expect(findings[0]?.observed).toBe(2);
+    expect(await ownerText(findings[0]!)).toContain("fn crowded");
+    expect(repeated.files).toEqual(result.files);
+    expect(repeated.rules).toEqual(result.rules);
+    expect([...repeated.findings]).toEqual([...result.findings]);
+  });
+
+  test("PowerShell uses hash captures in the generic nearest-owner counting pipeline", async () => {
+    const source = join(fixtureRoot, "sample.ps1");
+    const result = await inspect({ paths: [source], rulePaths: [powershellRulePath] });
+    const repeated = await inspect({ paths: [source], rulePaths: [powershellRulePath] });
+    const findings = records(result);
+
+    expect(result.languages).toEqual(["powershell"]);
+    expect(result.scannedFiles).toBe(1);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.findingCount).toBe(1);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.rule.id).toBe("powershell/excessive-invoke-expression");
+    expect(findings[0]?.observed).toBe(2);
+    expect(await ownerText(findings[0]!)).toContain("function Invoke-Repeatedly");
+    expect(repeated.files).toEqual(result.files);
+    expect(repeated.rules).toEqual(result.rules);
+    expect([...repeated.findings]).toEqual([...result.findings]);
+  });
+
+  test("PowerShell syntax errors produce diagnostics without partial findings", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "broken.ps1");
+    await Bun.write(source, "function Broken { Invoke-Expression $first");
+    const result = await inspect({ paths: [source], rulePaths: [powershellRulePath] });
+
+    expect(result.languages).toEqual(["powershell"]);
+    expect(result.scannedFiles).toBe(0);
+    expect(result.findingCount).toBe(0);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]?.message).toContain("syntax errors");
   });
 
   test("counts lexical sites, respects strict greater-than, and is reproducible", async () => {
@@ -52,7 +145,7 @@ describe("native counting capability probes", () => {
     expect(second.files).toEqual(first.files);
     expect(second.rules).toEqual(first.rules);
     expect([...second.findings]).toEqual([...first.findings]);
-    expect(records(first).filter((finding) => finding.observed === 1)).toHaveLength(2);
+    expect(records(first).filter((finding) => finding.observed === 1)).toHaveLength(4);
   });
 
   test("rejects invalid scalar options instead of coercing them", async () => {
@@ -83,7 +176,7 @@ describe("native counting capability probes", () => {
     expect((await inspect({ paths: [source], rulePaths: [changedRule] })).findingCount).toBe(0);
   });
 
-  test("only relevant languages run, and equal owner text remains separate", async () => {
+  test("only relevant rules run while discovery reports every supported language", async () => {
     const root = await temporaryRoot();
     for (const file of ["a.rs", "b.rs"]) {
       await Bun.write(join(root, file), "fn same() { a.clone(); b.clone(); }");
@@ -91,7 +184,7 @@ describe("native counting capability probes", () => {
     await Bun.write(join(root, "broken.go"), "func malformed(");
     await Bun.write(join(root, "unrelated.ts"), "not even valid TypeScript");
     const result = await inspect({ paths: [root], rulePaths: [rustRulePath] });
-    expect(result.languages).toEqual(["go", "rust"]);
+    expect(result.languages).toEqual(["go", "rust", "typescript"]);
     expect(result.scannedFiles).toBe(2);
     expect(result.diagnostics).toEqual([]);
     expect(new Set(records(result).map((finding) => finding.file)).size).toBe(2);

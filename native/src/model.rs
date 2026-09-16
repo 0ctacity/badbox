@@ -11,15 +11,106 @@ fn default_max_findings() -> u32 {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
+    Bash,
+    C,
+    Cpp,
+    CSharp,
+    Css,
+    Dart,
+    Elixir,
     Go,
+    Haskell,
+    Hcl,
+    Html,
+    Java,
+    JavaScript,
+    Json,
+    Kotlin,
+    Lua,
+    Markdown,
+    Nix,
+    Php,
+    PowerShell,
+    Python,
+    Ruby,
     Rust,
+    Scala,
+    Solidity,
+    Swift,
+    Tsx,
+    TypeScript,
+    Yaml,
+    Zig,
 }
 
 impl Language {
+    #[cfg(test)]
+    pub const ALL: [Self; 30] = [
+        Self::Bash,
+        Self::C,
+        Self::Cpp,
+        Self::CSharp,
+        Self::Css,
+        Self::Dart,
+        Self::Elixir,
+        Self::Go,
+        Self::Haskell,
+        Self::Hcl,
+        Self::Html,
+        Self::Java,
+        Self::JavaScript,
+        Self::Json,
+        Self::Kotlin,
+        Self::Lua,
+        Self::Markdown,
+        Self::Nix,
+        Self::Php,
+        Self::PowerShell,
+        Self::Python,
+        Self::Ruby,
+        Self::Rust,
+        Self::Scala,
+        Self::Solidity,
+        Self::Swift,
+        Self::Tsx,
+        Self::TypeScript,
+        Self::Yaml,
+        Self::Zig,
+    ];
+
     pub fn for_path(path: &Path) -> Option<Self> {
         match path.extension()?.to_str()? {
-            "rs" => Some(Self::Rust),
+            "bash" | "bats" | "cgi" | "command" | "env" | "fcgi" | "ksh" | "sh" | "tmux"
+            | "tool" | "zsh" => Some(Self::Bash),
+            "c" | "h" => Some(Self::C),
+            "cc" | "hpp" | "cpp" | "c++" | "hh" | "cxx" | "cu" | "ino" => Some(Self::Cpp),
+            "cs" => Some(Self::CSharp),
+            "css" | "scss" => Some(Self::Css),
+            "dart" => Some(Self::Dart),
+            "ex" | "exs" => Some(Self::Elixir),
             "go" => Some(Self::Go),
+            "hs" => Some(Self::Haskell),
+            "hcl" | "nomad" | "tf" | "tfvars" | "workflow" => Some(Self::Hcl),
+            "html" | "htm" | "xhtml" => Some(Self::Html),
+            "java" => Some(Self::Java),
+            "cjs" | "js" | "mjs" | "jsx" => Some(Self::JavaScript),
+            "json" => Some(Self::Json),
+            "kt" | "ktm" | "kts" => Some(Self::Kotlin),
+            "lua" => Some(Self::Lua),
+            "markdown" | "md" => Some(Self::Markdown),
+            "nix" => Some(Self::Nix),
+            "php" => Some(Self::Php),
+            "ps1" | "psm1" | "psd1" => Some(Self::PowerShell),
+            "py" | "py3" | "pyi" | "bzl" | "bazel" => Some(Self::Python),
+            "rb" | "rbw" | "gemspec" => Some(Self::Ruby),
+            "rs" => Some(Self::Rust),
+            "scala" | "sc" | "sbt" => Some(Self::Scala),
+            "sol" => Some(Self::Solidity),
+            "swift" => Some(Self::Swift),
+            "tsx" => Some(Self::Tsx),
+            "ts" | "cts" | "mts" => Some(Self::TypeScript),
+            "yaml" | "yml" => Some(Self::Yaml),
+            "zig" => Some(Self::Zig),
             _ => None,
         }
     }
@@ -142,4 +233,61 @@ pub struct PerformanceProfile {
     pub parse_cache_hits: usize,
     pub parse_cache_misses: usize,
     pub worker_threads: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_every_builtin_language_from_a_representative_extension() {
+        let cases = [
+            ("input.sh", Language::Bash),
+            ("input.c", Language::C),
+            ("input.cpp", Language::Cpp),
+            ("input.cs", Language::CSharp),
+            ("input.css", Language::Css),
+            ("input.dart", Language::Dart),
+            ("input.ex", Language::Elixir),
+            ("input.go", Language::Go),
+            ("input.hs", Language::Haskell),
+            ("input.tf", Language::Hcl),
+            ("input.html", Language::Html),
+            ("input.java", Language::Java),
+            ("input.js", Language::JavaScript),
+            ("input.json", Language::Json),
+            ("input.kt", Language::Kotlin),
+            ("input.lua", Language::Lua),
+            ("input.md", Language::Markdown),
+            ("input.nix", Language::Nix),
+            ("input.php", Language::Php),
+            ("input.ps1", Language::PowerShell),
+            ("input.py", Language::Python),
+            ("input.rb", Language::Ruby),
+            ("input.rs", Language::Rust),
+            ("input.scala", Language::Scala),
+            ("input.sol", Language::Solidity),
+            ("input.swift", Language::Swift),
+            ("input.tsx", Language::Tsx),
+            ("input.ts", Language::TypeScript),
+            ("input.yaml", Language::Yaml),
+            ("input.zig", Language::Zig),
+        ];
+
+        assert_eq!(cases.len(), Language::ALL.len());
+        for (path, expected) in cases {
+            assert_eq!(
+                Language::for_path(Path::new(path)),
+                Some(expected),
+                "{path}"
+            );
+        }
+        for path in ["input.psm1", "input.psd1"] {
+            assert_eq!(
+                Language::for_path(Path::new(path)),
+                Some(Language::PowerShell),
+                "{path}"
+            );
+        }
+    }
 }

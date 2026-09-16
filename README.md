@@ -4,11 +4,12 @@ Badbox is a deterministic bad-pattern detector for codebases. It reports
 suspicious structural evidence and leaves the decision to a developer or coding
 agent.
 
-This development checkout implements two capability probes:
-`rust/excessive-clones` and `go/excessive-goroutines`. Both use the same native
-ownership, counting, threshold, and evidence pipeline. YAML is currently an
-input frontend that compiles to a Badbox-owned rule IR; TypeScript does not
-perform matching or aggregation.
+This development checkout implements four capability probes:
+`rust/excessive-clones`, `go/excessive-goroutines`,
+`powershell/excessive-invoke-expression`, and `zig/excessive-as-casts`. All four
+use the same native ownership, counting, threshold, and evidence pipeline. YAML
+is currently an input frontend that compiles to a Badbox-owned rule IR;
+TypeScript does not perform matching or aggregation.
 
 The published npm `0.0.1` is still the earlier scaffold. The native scanner is
 experimental, source-build only, and has not been released.
@@ -60,9 +61,10 @@ In this checkout, import from `./src/scanner/index.ts` instead. The legacy
 executed by this scanner.
 
 One asynchronous native call compiles YAML into the Badbox rule IR, discovers
-`.rs` and `.go` files, compiles selectors through the active structural backend,
-parses relevant files, assigns nearest owners, counts, and returns bounded
-five-integer records in a native `Uint32Array`. File paths and rule metadata are
+files for 30 statically bundled languages, compiles selectors through the
+active structural backend, parses relevant files, assigns nearest owners,
+counts, and returns bounded five-integer records in a native `Uint32Array`.
+File paths and rule metadata are
 interned once in tables. The current backend uses ast-grep-core behind a Rust
 trait; no ast-grep nodes cross into evaluation or the public API. TypeScript
 only invokes the engine and parses the small metadata document.
@@ -85,8 +87,13 @@ findings are sorted after parallel work, preserving deterministic output.
   directories, and does not follow nested symlinks. Explicit roots opt into those
   roots. Bundled source copies and tests are not automatically deduplicated or
   separated: choose source roots deliberately.
-- Supported languages are Rust and Go only. File extensions select relevant
-  rules; this is not framework or dependency detection.
+- The native backend supports all 28 parsers built into ast-grep 0.45.1: Bash,
+  C, C++, C#, CSS, Dart, Elixir, Go, Haskell, HCL, HTML, Java, JavaScript/JSX,
+  JSON, Kotlin, Lua, Markdown, Nix, PHP, Python, Ruby, Rust, Scala, Solidity,
+  Swift, TSX, TypeScript, and YAML, plus Badbox's statically linked PowerShell
+  and Zig parsers.
+  File extensions select relevant rules; this is not framework or dependency
+  detection. The bundled probes target Rust, Go, PowerShell, and Zig.
 - Syntax-error files yield diagnostics and no partial findings. Unreadable files
   fail the scan. Zero-count owners are not returned.
 - File parallelism is bounded at four workers. Caches are process-local and
@@ -95,8 +102,9 @@ findings are sorted after parallel work, preserving deterministic output.
 - Findings are five `u32` values each and are bounded by default while exact
   total and observed counts are retained. Raising `maxFindings` increases the
   native buffer linearly at 20 bytes per returned finding.
-- Zig, cancellation evidence, additional aggregates, and prebuilt native npm
-  packages are not implemented. Rule format version `1` is experimental.
+- SQL parsing, cancellation evidence, additional aggregates, and
+  prebuilt native npm packages are not implemented. Rule format version `1` is
+  experimental.
 
 ## Development checks
 

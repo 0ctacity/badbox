@@ -1,0 +1,14 @@
+version: 1
+id: powershell/excessive-invoke-expression
+language: powershell
+summary: Function contains multiple Invoke-Expression calls
+severity: info
+select:
+  pattern: "Invoke-Expression #COMMAND"
+owner:
+  nearest: [function_statement]
+aggregate: count
+threshold:
+  gt: 1
+evidence:
+  subject: Invoke-Expression call sites

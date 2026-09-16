@@ -1,4 +1,34 @@
-export type ScanLanguage = "go" | "rust";
+export type ScanLanguage =
+  | "bash"
+  | "c"
+  | "cpp"
+  | "csharp"
+  | "css"
+  | "dart"
+  | "elixir"
+  | "go"
+  | "haskell"
+  | "hcl"
+  | "html"
+  | "java"
+  | "javascript"
+  | "json"
+  | "kotlin"
+  | "lua"
+  | "markdown"
+  | "nix"
+  | "php"
+  | "powershell"
+  | "python"
+  | "ruby"
+  | "rust"
+  | "scala"
+  | "solidity"
+  | "swift"
+  | "tsx"
+  | "typescript"
+  | "yaml"
+  | "zig";
 export type ScanSeverity = "info" | "warning" | "error";
 
 export const findingRecordWidth = 5;
@@ -22,7 +52,7 @@ export interface RuleMetadata {
 
 export interface InspectOptions {
   readonly paths: readonly string[];
-  /** Defaults to the bundled Rust and Go capability probes. */
+  /** Defaults to the bundled Rust, Go, PowerShell, and Zig capability probes. */
   readonly rulePaths?: readonly string[];
   /** Overrides each rule's strict greater-than threshold. */
   readonly threshold?: number;

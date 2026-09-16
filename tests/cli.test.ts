@@ -13,8 +13,10 @@ test("scan runs the native probes and presents observed counts", async () => {
   expect(stderr).toBe("");
   expect(stdout).toContain("rust/excessive-clones");
   expect(stdout).toContain("go/excessive-goroutines");
+  expect(stdout).toContain("powershell/excessive-invoke-expression");
+  expect(stdout).toContain("zig/excessive-as-casts");
   expect(stdout).toContain("2 > 1");
-  expect(stdout).toContain("2 files scanned, 7 findings");
+  expect(stdout).toContain("4 files scanned, 9 findings");
 });
 
 test("scan rejects unsupported flags instead of silently ignoring them", async () => {

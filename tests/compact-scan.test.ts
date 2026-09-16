@@ -10,10 +10,12 @@ test("native scan returns interned tables and fixed-width integer findings", asy
   expect(result.recordWidth).toBe(5);
   expect(result.findings).toBeInstanceOf(Uint32Array);
   expect(result.findings.length).toBe(result.findingCount * result.recordWidth);
-  expect(result.files).toHaveLength(2);
+  expect(result.files).toHaveLength(4);
   expect(result.rules.map((rule) => rule.id)).toEqual([
     "rust/excessive-clones",
     "go/excessive-goroutines",
+    "powershell/excessive-invoke-expression",
+    "zig/excessive-as-casts",
   ]);
 
   for (let offset = 0; offset < result.findings.length; offset += result.recordWidth) {

@@ -24,6 +24,12 @@ evidence:
 
 The [Go probe](go/excessive-goroutines.yaml) uses the same schema and evaluator,
 with `select: { kind: go_statement }` and Go's callable node kinds.
+The [Zig probe](zig/excessive-as-casts.yaml) counts `@as` patterns inside Zig
+function declarations through that same pipeline.
+The [PowerShell probe](powershell/excessive-invoke-expression.yaml) counts
+`Invoke-Expression` calls inside PowerShell functions. PowerShell patterns use
+uppercase `#NAME` captures so ordinary `$name` and `$NAME` variables remain
+literal syntax. Lowercase hash capture names are rejected.
 
 ## Contract
 
@@ -31,8 +37,12 @@ with `select: { kind: go_statement }` and Go's callable node kinds.
   kinds, duplicate rule IDs, unsupported versions/aggregates, and invalid
   thresholds are rejected. IDs use lowercase `namespace/name` with digits and
   hyphens allowed after the first letter of each part.
-- `language` is `rust` or `go`. The scanner's language registry maps extensions
-  to parsers. A rule does not select its own parser binary or execute code.
+- `language` is one of `bash`, `c`, `cpp`, `csharp`, `css`, `dart`, `elixir`,
+  `go`, `haskell`, `hcl`, `html`, `java`, `javascript`, `json`, `kotlin`, `lua`,
+  `markdown`, `nix`, `php`, `powershell`, `python`, `ruby`, `rust`, `scala`,
+  `solidity`, `swift`, `tsx`, `typescript`, `yaml`, or `zig`. JSX files use `javascript`.
+  The scanner's registry maps extensions to statically linked parsers. A rule
+  does not select its own parser binary or execute code.
 - `select` contains exactly one `pattern` or `kind`. Patterns currently use
   ast-grep structural pattern semantics, including metavariables. Kind names
   are Tree-sitter grammar names. These are explicit backend dependencies of
@@ -79,10 +89,13 @@ findings. Findings are observations, not assertions that code must change.
 
 ## Capability check
 
-The fixture suite proves that Rust clone calls and Go launch statements use the
-same ownership and evaluator code. It also changes a test rule's pattern and
-threshold using YAML alone and verifies the changed evidence through the native
-API. No language-specific detector function is involved.
+The fixture suite proves that Rust clone calls, Go launch statements, PowerShell
+`Invoke-Expression` calls, and Zig `@as` calls use the same ownership and
+evaluator code, exercises Python end to end, and verifies that all 30 bundled
+parsers accept representative source and file extensions.
+It also changes a test rule's pattern and threshold using YAML alone and verifies
+the changed evidence through the native API. No language-specific detector
+function is involved.
 
-The cancellation-evidence rule and Zig probes are intentionally not part of this
-first slice.
+The cancellation-evidence rule and SQL parsing are intentionally not
+part of this slice.

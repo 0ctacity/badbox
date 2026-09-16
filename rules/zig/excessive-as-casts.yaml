@@ -1,0 +1,14 @@
+version: 1
+id: zig/excessive-as-casts
+language: zig
+summary: Function contains multiple @as cast calls
+severity: info
+select:
+  pattern: "@as($TYPE, $VALUE)"
+owner:
+  nearest: [function_declaration]
+aggregate: count
+threshold:
+  gt: 1
+evidence:
+  subject: "@as cast call sites"

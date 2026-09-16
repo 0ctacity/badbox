@@ -14,6 +14,8 @@ const require = createRequire(import.meta.url);
 const defaultRulePaths = [
   "../../rules/rust/excessive-clones.yaml",
   "../../rules/go/excessive-goroutines.yaml",
+  "../../rules/powershell/excessive-invoke-expression.yaml",
+  "../../rules/zig/excessive-as-casts.yaml",
 ].map((path) => fileURLToPath(new URL(path, import.meta.url)));
 
 interface NativeEngine {

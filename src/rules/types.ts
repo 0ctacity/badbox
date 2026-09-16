@@ -1,6 +1,8 @@
+import type { ScanLanguage } from "../scanner/types.ts";
+
 export type Severity = "info" | "warning" | "error";
 
-export type Language = "javascript" | "jsx" | "typescript" | "tsx";
+export type Language = ScanLanguage;
 
 export type Framework = "react";
 

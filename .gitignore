@@ -39,3 +39,5 @@ native/build/
 
 # local benchmark output
 benchmarks/results/
+
+docs/octapowers
