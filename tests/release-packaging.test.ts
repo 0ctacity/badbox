@@ -12,6 +12,7 @@ import {
   preparePlatformPackages,
 } from "../scripts/package-platforms.ts";
 import { validateRelease } from "../scripts/validate-release.ts";
+import { prepareBootstrapPackages } from "../scripts/bootstrap-platform-packages.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -100,4 +101,30 @@ test("release validation requires one version across npm and Rust manifests", as
   const root = fileURLToPath(new URL("../", import.meta.url));
   await expect(validateRelease(root, "0.0.1")).resolves.toBeUndefined();
   await expect(validateRelease(root, "9.9.9")).rejects.toThrow("expected 9.9.9");
+});
+
+test("bootstrap packages reserve every platform name without shipping a fake binary", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "badbox-bootstrap-test-"));
+  temporaryDirectories.push(directory);
+  await prepareBootstrapPackages({
+    root: new URL("../", import.meta.url),
+    outputDir: directory,
+  });
+
+  for (const platform of platformPackages) {
+    const packageDirectory = join(directory, platform.name);
+    const manifest = JSON.parse(await readFile(join(packageDirectory, "package.json"), "utf8"));
+    expect(manifest).toMatchObject({
+      name: platform.name,
+      version: "0.0.0",
+      main: "index.cjs",
+      files: ["index.cjs"],
+      os: [platform.os],
+      cpu: [platform.cpu],
+      publishConfig: { access: "public" },
+    });
+    expect(await readFile(join(packageDirectory, "index.cjs"), "utf8"))
+      .toContain("namespace-reservation package");
+    await expect(Bun.file(join(packageDirectory, "badbox.node")).exists()).resolves.toBe(false);
+  }
 });

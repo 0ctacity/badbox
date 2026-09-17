@@ -39,6 +39,7 @@
   },
   "scripts": {
     "benchmark": "bun run benchmarks/run.ts",
+    "bootstrap:platform-packages": "bun run scripts/bootstrap-platform-packages.ts",
     "build:native": "bun run scripts/build-native.ts",
     "package:platforms": "bun run scripts/package-platforms.ts",
     "release:check": "bun run scripts/validate-release.ts",

@@ -113,6 +113,18 @@ findings are sorted after parallel work, preserving deterministic output.
 
 ## Releasing to npm
 
+Reserve the five platform package names once from an npm-authenticated local
+shell. Inspect all five package payloads first, then publish version `0.0.0`
+under the non-default `bootstrap` tag:
+
+```bash
+bun run bootstrap:platform-packages --dry-run
+bun run bootstrap:platform-packages --publish
+```
+
+The bootstrap packages deliberately contain no native binaries. Their only
+purpose is to create the npm packages so trusted publishing can be configured.
+
 Set the same new version in `package.json`, both native `Cargo.toml` files, and
 all five `optionalDependencies`, then commit and push it. Run the **Release npm
 packages** workflow with that version. It builds and tests each native target,
