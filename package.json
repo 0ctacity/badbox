@@ -41,6 +41,7 @@
     "benchmark": "bun run benchmarks/run.ts",
     "bootstrap:platform-packages": "bun run scripts/bootstrap-platform-packages.ts",
     "build:native": "bun run scripts/build-native.ts",
+    "ci": "bun run scripts/ci.ts",
     "package:platforms": "bun run scripts/package-platforms.ts",
     "release:check": "bun run scripts/validate-release.ts",
     "check": "bun run src/cli.ts check",

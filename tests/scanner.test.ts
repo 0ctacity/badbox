@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspect, iterateFindings, type CheckResult, type FindingRecord } from "../src/scanner/index.ts";
 
@@ -283,7 +283,7 @@ test rust/excessive-clones "reports excessive clones" {
     const result = await inspect({ paths: [root], rulePaths: [rustRulePath] });
     expect(result.checkedFiles).toBe(1);
     expect(result.findingCount).toBe(1);
-    expect(records(result)[0]?.file).toEndWith("/kept.rs");
+    expect(records(result).map((finding) => basename(finding.file))).toEqual(["kept.rs"]);
   });
 
   test("syntax errors produce diagnostics without partial findings", async () => {
