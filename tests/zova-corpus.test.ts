@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { inspect, iterateFindings } from "../src/scanner/index.ts";
 
 const root = fileURLToPath(new URL("./fixtures/zova", import.meta.url));
+const rulePack = fileURLToPath(new URL("../examples/rules", import.meta.url));
 
 interface LabelRange { startByte: number; endByte: number; text: string }
 interface Corpus {
@@ -21,9 +22,9 @@ interface Corpus {
 test("frozen Zova labels match exact compact owner ranges and counts", async () => {
   const corpus: Corpus = await Bun.file(`${root}/labels.json`).json();
   expect(corpus.cases).toHaveLength(30);
-  const result = await inspect({ paths: [`${root}/source`], threshold: 0 });
+  const result = await inspect({ paths: [`${root}/source`], rulePaths: [rulePack], threshold: 0 });
   expect(result.diagnostics).toEqual([]);
-  expect(result.scannedFiles).toBe(30);
+  expect(result.checkedFiles).toBe(30);
   const expected = [];
   for (const entry of corpus.cases) {
     const file = `${root}/source/${entry.file}`;
@@ -58,7 +59,9 @@ test("frozen Zova labels match exact compact owner ranges and counts", async () 
   expect(actual).toHaveLength(18);
   expect(actual.reduce((sum, owner) => sum + owner.observed, 0)).toBe(19);
 
-  const thresholded = await inspect({ paths: [`${root}/source`], threshold: 1 });
+  const thresholded = await inspect({
+    paths: [`${root}/source`], rulePaths: [rulePack], threshold: 1,
+  });
   const only = [...iterateFindings(thresholded)];
   expect(only).toHaveLength(1);
   expect(only[0]?.observed).toBe(2);
@@ -84,9 +87,9 @@ test("concatenated Rust excerpts keep equal owner ranges separate by offset", as
     }
     const path = join(temporary, "combined.rs");
     await Bun.write(path, source);
-    const result = await inspect({ paths: [path], threshold: 0 });
+    const result = await inspect({ paths: [path], rulePaths: [rulePack], threshold: 0 });
     expect(result.diagnostics).toEqual([]);
-    expect(result.scannedFiles).toBe(1);
+    expect(result.checkedFiles).toBe(1);
     expect([...iterateFindings(result)].map(({ ownerStart, ownerEnd, observed }) => ({
       ownerStart, ownerEnd, observed,
     }))).toEqual(expected);

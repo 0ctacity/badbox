@@ -234,8 +234,7 @@ mod tests {
     #[test]
     fn relational_clauses_are_rejected_until_the_evaluator_supports_them() {
         let error = compile(
-            r#"
-badbox 1
+            r#"#badbox 1
 rule rust/guarded for rust {
   summary "guarded"
   find code(value) `value.clone()`

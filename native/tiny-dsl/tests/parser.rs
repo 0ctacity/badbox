@@ -4,10 +4,18 @@ use tiny_dsl::{
 };
 
 #[test]
+fn requires_the_hash_prefixed_version_header() {
+    let document = parse("#badbox 1\n").expect("hash-prefixed header should parse");
+    assert_eq!(document.version, 1);
+
+    let error = parse("badbox 1\n").expect_err("plain header should be rejected");
+    assert!(error.to_string().contains("#badbox 1"));
+}
+
+#[test]
 fn parses_versioned_rules_and_external_fixture_tests() {
     let document = parse(
-        r#"
-badbox 1
+        r#"#badbox 1
 
 rule rust/excessive-clones for rust {
   summary "Excessive clone calls within one callable"
@@ -95,8 +103,7 @@ test rust/excessive-clones "accepts limited clones" {
 #[test]
 fn parses_relational_and_capture_predicates_without_erasing_them() {
     let document = parse(
-        r#"
-badbox 1
+        r#"#badbox 1
 rule rust/checked-calls for rust {
   summary "Calls should have recognized evidence"
   find code(value, method) `value.method()`
@@ -148,7 +155,7 @@ rule rust/checked-calls for rust {
 
 #[test]
 fn rejects_unsupported_versions_and_invalid_rule_ids() {
-    let unsupported = parse("badbox 2").expect_err("version is rejected");
+    let unsupported = parse("#badbox 2").expect_err("version is rejected");
     assert!(
         unsupported
             .to_string()
@@ -156,8 +163,7 @@ fn rejects_unsupported_versions_and_invalid_rule_ids() {
     );
 
     let invalid = parse(
-        r#"
-badbox 1
+        r#"#badbox 1
 rule NoNamespace for rust {}
 "#,
     )

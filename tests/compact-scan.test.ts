@@ -3,18 +3,19 @@ import { fileURLToPath } from "node:url";
 import { inspect } from "../src/scanner/index.ts";
 
 const fixtureRoot = fileURLToPath(new URL("./fixtures/counts", import.meta.url));
+const rulePack = fileURLToPath(new URL("../examples/rules", import.meta.url));
 
 test("native scan returns interned tables and fixed-width integer findings", async () => {
-  const result = await inspect({ paths: [fixtureRoot], threshold: 1 });
+  const result = await inspect({ paths: [fixtureRoot], rulePaths: [rulePack], threshold: 1 });
 
   expect(result.recordWidth).toBe(5);
   expect(result.findings).toBeInstanceOf(Uint32Array);
   expect(result.findings.length).toBe(result.findingCount * result.recordWidth);
   expect(result.files).toHaveLength(4);
   expect(result.rules.map((rule) => rule.id)).toEqual([
-    "rust/excessive-clones",
     "go/excessive-goroutines",
     "powershell/excessive-invoke-expression",
+    "rust/excessive-clones",
     "zig/excessive-as-casts",
   ]);
 

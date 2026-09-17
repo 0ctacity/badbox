@@ -182,7 +182,22 @@ enum TokenKind {
 }
 
 pub fn parse(source: &str) -> Result<Document, ParseError> {
-    Parser::new(lex(source)?).parse_document()
+    let Some(remainder) = source.strip_prefix("#badbox") else {
+        return Err(ParseError {
+            message: "expected #badbox 1 version header".into(),
+            line: 1,
+            column: 1,
+        });
+    };
+    if !remainder.starts_with(char::is_whitespace) {
+        return Err(ParseError {
+            message: "expected #badbox 1 version header".into(),
+            line: 1,
+            column: 1,
+        });
+    }
+    let normalized = format!(" badbox{remainder}");
+    Parser::new(lex(&normalized)?).parse_document()
 }
 
 struct Parser {

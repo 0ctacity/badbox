@@ -1,4 +1,4 @@
-badbox 1
+#badbox 1
 
 rule powershell/excessive-invoke-expression for powershell {
   summary "Function contains multiple Invoke-Expression calls"

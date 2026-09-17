@@ -161,7 +161,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<void> {
             rulePaths: [rulePaths[index]!],
             ...fullOutput,
           });
-          if (reference.scannedFiles !== input.paths.length) throw new Error("reference did not scan every input file");
+          if (reference.checkedFiles !== input.paths.length) throw new Error("reference did not check every input file");
           references.push(fingerprints(reference)[rules[index]!.id]);
         }
         for (const count of ruleCounts) {
@@ -173,7 +173,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<void> {
           }
           const config: WorkerConfig = {
             options: { paths: input.paths, rulePaths: rulePaths.slice(0, count), ...fullOutput },
-            expected, scannedFiles: input.paths.length, warmups: 0, samples: 1,
+            expected, checkedFiles: input.paths.length, warmups: 0, samples: 1,
           };
           const configPath = join(scratch, "worker.json");
           await writeFile(configPath, JSON.stringify(config));

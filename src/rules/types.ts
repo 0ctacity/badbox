@@ -1,8 +1,8 @@
-import type { ScanLanguage } from "../scanner/types.ts";
+import type { CheckLanguage } from "../scanner/types.ts";
 
 export type Severity = "info" | "warning" | "error";
 
-export type Language = ScanLanguage;
+export type Language = CheckLanguage;
 
 export type Framework = "react";
 

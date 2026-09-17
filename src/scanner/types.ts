@@ -1,4 +1,4 @@
-export type ScanLanguage =
+export type CheckLanguage =
   | "bash"
   | "c"
   | "cpp"
@@ -29,7 +29,7 @@ export type ScanLanguage =
   | "typescript"
   | "yaml"
   | "zig";
-export type ScanSeverity = "info" | "warning" | "error";
+export type CheckSeverity = "info" | "warning" | "error";
 
 export const findingRecordWidth = 5;
 
@@ -43,18 +43,18 @@ export const findingRecord = {
 
 export interface RuleMetadata {
   readonly id: string;
-  readonly language: ScanLanguage;
+  readonly language: CheckLanguage;
   readonly summary: string;
   readonly message: string;
-  readonly severity: ScanSeverity;
+  readonly severity: CheckSeverity;
   readonly threshold: number;
   readonly evidenceSubject: string;
 }
 
 export interface InspectOptions {
   readonly paths: readonly string[];
-  /** Defaults to the bundled Rust, Go, PowerShell, and Zig capability probes. */
-  readonly rulePaths?: readonly string[];
+  /** One or more rule files or recursively loaded rule-pack directories. */
+  readonly rulePaths: readonly string[];
   /** Rule-local scalar overrides keyed as "namespace/rule.parameter". */
   readonly parameters?: Readonly<Record<string, string | number | boolean>>;
   /** Overrides each rule's strict greater-than threshold. */
@@ -89,12 +89,12 @@ export interface PerformanceProfile {
   readonly workerThreads: number;
 }
 
-export interface ScanResult {
+export interface CheckResult {
   readonly recordWidth: typeof findingRecordWidth;
-  readonly languages: readonly ScanLanguage[];
+  readonly languages: readonly CheckLanguage[];
   readonly files: readonly string[];
   readonly rules: readonly RuleMetadata[];
-  readonly scannedFiles: number;
+  readonly checkedFiles: number;
   readonly findingCount: number;
   /** Flat records: fileId, ruleId, ownerStart, ownerEnd, observed. */
   readonly findings: Uint32Array;

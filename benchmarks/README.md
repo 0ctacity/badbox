@@ -86,7 +86,7 @@ cache entries can be validated against exact contents.
 
 Before timing, each of the ten selector templates runs individually on each
 input. Every measured batched run must match those per-rule finding/evidence
-fingerprints exactly and scan every input file with no diagnostics. This catches
+fingerprints exactly and check every input file with no diagnostics. This catches
 batching omissions and nondeterminism; it is not independent semantic ground
 truth for benchmark-only selectors. The separately labeled corpus supplies
 ground truth for the two product probes.

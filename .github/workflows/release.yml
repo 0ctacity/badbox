@@ -98,7 +98,10 @@ jobs:
           npm install --ignore-scripts \
             "../packages/badbox-linux-x64-gnu-${RELEASE_VERSION}.tgz" \
             "../packages/badbox-${RELEASE_VERSION}.tgz"
-          bun -e 'import { inspect, iterateFindings } from "badbox/scanner"; await Bun.write("sample.rs", "fn example() { let a = value.clone(); let b = value.clone(); }"); const result = await inspect({ paths: ["sample.rs"] }); if ([...iterateFindings(result)].length !== 1) throw new Error("installed-package scan failed");'
+          mkdir .badbox
+          cp node_modules/badbox/examples/rules/rust/excessive-clones.badbox .badbox/
+          bun -e 'await Bun.write("sample.rs", "fn example() { let a = value.clone(); let b = value.clone(); }")'
+          bun node_modules/badbox/src/cli.ts check sample.rs
       - uses: actions/upload-artifact@v4
         with:
           name: npm-packages
@@ -125,7 +128,6 @@ jobs:
       - name: Publish native packages, then Badbox
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
           if npm view "badbox@${RELEASE_VERSION}" version >/dev/null 2>&1; then

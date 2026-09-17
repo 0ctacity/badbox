@@ -41,7 +41,7 @@ test("benchmark workers consume native results and detect incorrect expectations
     const reference = await inspect(options);
     const expected = fingerprints(reference);
     const config = join(root, "worker.json");
-    await Bun.write(config, JSON.stringify({ options, expected, scannedFiles: 1, warmups: 1, samples: 2, profile: true }));
+    await Bun.write(config, JSON.stringify({ options, expected, checkedFiles: 1, warmups: 1, samples: 2, profile: true }));
     const result = await measureWorker(config);
     expect(result.scanMs).toHaveLength(2);
     expect(result.warmupMs).toHaveLength(1);
@@ -58,10 +58,10 @@ test("benchmark workers consume native results and detect incorrect expectations
     expect(performance.ruleLoadMs).toBeGreaterThanOrEqual(0);
     expect(performance.serializationMs).toBeGreaterThanOrEqual(0);
     expect(performance.jsDecodeMs).toBeGreaterThanOrEqual(0);
-    await Bun.write(config, JSON.stringify({ options, expected, scannedFiles: 1, warmups: 0, samples: 1 }));
+    await Bun.write(config, JSON.stringify({ options, expected, checkedFiles: 1, warmups: 0, samples: 1 }));
     const unprofiled = await measureWorker(config);
     expect((unprofiled as { performance?: unknown }).performance).toBeUndefined();
-    await Bun.write(config, JSON.stringify({ options, expected: {}, scannedFiles: 1, warmups: 0, samples: 1 }));
+    await Bun.write(config, JSON.stringify({ options, expected: {}, checkedFiles: 1, warmups: 0, samples: 1 }));
     await expect(measureWorker(config)).rejects.toThrow("fingerprint");
   } finally {
     await rm(root, { recursive: true, force: true });

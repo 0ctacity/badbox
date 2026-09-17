@@ -1,6 +1,6 @@
 {
   "name": "badbox",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Deterministic bad-pattern detection for codebases.",
   "license": "MIT",
   "repository": {
@@ -12,14 +12,14 @@
   "types": "./src/rules/index.ts",
   "exports": {
     ".": "./src/rules/index.ts",
-    "./scanner": "./src/scanner/index.ts"
+    "./checker": "./src/scanner/index.ts"
   },
   "bin": {
     "badbox": "./src/cli.ts"
   },
   "files": [
     "src",
-    "rules",
+    "examples",
     "native/src",
     "native/Cargo.toml",
     "native/Cargo.lock",
@@ -43,7 +43,7 @@
     "build:native": "bun run scripts/build-native.ts",
     "package:platforms": "bun run scripts/package-platforms.ts",
     "release:check": "bun run scripts/validate-release.ts",
-    "scan": "bun run src/cli.ts scan",
+    "check": "bun run src/cli.ts check",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
@@ -52,10 +52,10 @@
     "typescript": "5.9.3"
   },
   "optionalDependencies": {
-    "badbox-darwin-arm64": "0.0.1",
-    "badbox-darwin-x64": "0.0.1",
-    "badbox-linux-arm64-gnu": "0.0.1",
-    "badbox-linux-x64-gnu": "0.0.1",
-    "badbox-windows-x64": "0.0.1"
+    "badbox-darwin-arm64": "0.1.0",
+    "badbox-darwin-x64": "0.1.0",
+    "badbox-linux-arm64-gnu": "0.1.0",
+    "badbox-linux-x64-gnu": "0.1.0",
+    "badbox-windows-x64": "0.1.0"
   }
 }

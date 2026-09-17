@@ -209,12 +209,12 @@ fn scan_pool() -> Result<&'static ThreadPool> {
         .get_or_init(|| {
             ThreadPoolBuilder::new()
                 .num_threads(MAX_SCAN_THREADS)
-                .thread_name(|index| format!("badbox-scan-{index}"))
+                .thread_name(|index| format!("badbox-check-{index}"))
                 .build()
                 .map_err(|error| error.to_string())
         })
         .as_ref()
-        .map_err(|error| anyhow!("creating scan thread pool: {error}"))
+        .map_err(|error| anyhow!("creating check thread pool: {error}"))
 }
 
 #[derive(Default)]
@@ -537,10 +537,10 @@ fn discover(paths: &[String]) -> Result<BTreeSet<PathBuf>> {
     ensure!(!paths.is_empty(), "paths must not be empty");
     let mut files = BTreeSet::new();
     for path in paths {
-        ensure!(!path.trim().is_empty(), "scan path must not be empty");
+        ensure!(!path.trim().is_empty(), "source path must not be empty");
         let root = Path::new(path)
             .canonicalize()
-            .with_context(|| format!("scan path {path}"))?;
+            .with_context(|| format!("source path {path}"))?;
         let walker = WalkBuilder::new(&root)
             .require_git(false)
             .follow_links(false)
@@ -651,7 +651,7 @@ fn scan_file(
     plan: &[ExecutionGroup],
     settings: FileScanSettings,
 ) -> Result<FileScan> {
-    let file_name = file.to_str().context("scan path is not valid UTF-8")?;
+    let file_name = file.to_str().context("source path is not valid UTF-8")?;
     let read_started = Instant::now();
     let source = fs::read_to_string(file).with_context(|| format!("reading {file_name}"))?;
     let read = if settings.profile {
@@ -809,13 +809,13 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
     let relevant_files = file_list.len();
     ensure!(
         file_list.len() <= u32::MAX as usize,
-        "scan contains more than u32::MAX relevant files"
+        "check contains more than u32::MAX relevant files"
     );
     let file_names = file_list
         .iter()
         .map(|path| {
             path.to_str()
-                .context("scan path is not valid UTF-8")
+                .context("source path is not valid UTF-8")
                 .map(str::to_owned)
         })
         .collect::<Result<Vec<_>>>()?;
@@ -833,7 +833,7 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
         languages: languages.into_iter().collect(),
         files: file_names,
         rules,
-        scanned_files: 0,
+        checked_files: 0,
         finding_count: 0,
         truncated: false,
         diagnostics: Vec::new(),
@@ -877,7 +877,7 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
                 result_cache_candidate_bytes += candidate.estimated_bytes;
                 result_cache_candidates.push(candidate);
             }
-            metadata.scanned_files += usize::from(file.scanned);
+            metadata.checked_files += usize::from(file.scanned);
             metadata.finding_count += file.finding_count;
             let remaining = (options.max_findings as usize).saturating_sub(findings.len());
             findings.extend(file.findings.drain(..remaining.min(file.findings.len())));
@@ -939,7 +939,7 @@ impl Task for InspectTask {
     fn compute(&mut self) -> napi::Result<Self::Output> {
         let run = || -> Result<InspectOutput> {
             let options: ScanOptions =
-                serde_json::from_str(&self.0).context("invalid scan options")?;
+                serde_json::from_str(&self.0).context("invalid check options")?;
             let profile = options.profile;
             let mut result = scan(options)?;
             if profile {

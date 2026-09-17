@@ -3,18 +3,19 @@ import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { inspect, iterateFindings, type FindingRecord, type ScanResult } from "../src/scanner/index.ts";
+import { inspect, iterateFindings, type CheckResult, type FindingRecord } from "../src/scanner/index.ts";
 
 const fixtureRoot = fileURLToPath(new URL("./fixtures/counts", import.meta.url));
-const rustRulePath = fileURLToPath(new URL("../rules/rust/excessive-clones.yaml", import.meta.url));
-const goRulePath = fileURLToPath(new URL("../rules/go/excessive-goroutines.yaml", import.meta.url));
+const exampleRulePack = fileURLToPath(new URL("../examples/rules", import.meta.url));
+const rustRulePath = fileURLToPath(new URL("../examples/yaml/rust/excessive-clones.yaml", import.meta.url));
+const goRulePath = fileURLToPath(new URL("../examples/yaml/go/excessive-goroutines.yaml", import.meta.url));
 const powershellRulePath = fileURLToPath(new URL(
-  "../rules/powershell/excessive-invoke-expression.yaml", import.meta.url,
+  "../examples/yaml/powershell/excessive-invoke-expression.yaml", import.meta.url,
 ));
-const zigRulePath = fileURLToPath(new URL("../rules/zig/excessive-as-casts.yaml", import.meta.url));
+const zigRulePath = fileURLToPath(new URL("../examples/yaml/zig/excessive-as-casts.yaml", import.meta.url));
 const temporaryRoots: string[] = [];
 
-const records = (result: ScanResult) => [...iterateFindings(result)];
+const records = (result: CheckResult) => [...iterateFindings(result)];
 
 async function ownerText(finding: FindingRecord): Promise<string> {
   const bytes = new Uint8Array(await Bun.file(finding.file).arrayBuffer());
@@ -41,8 +42,7 @@ describe("native counting capability probes", () => {
       source,
       "fn example() { a.clone(); b.clone(); a.unwrap(); b.unwrap(); }",
     );
-    await Bun.write(join(rules, "rust.badbox"), `
-badbox 1
+    await Bun.write(join(rules, "rust.badbox"), `#badbox 1
 
 rule rust/excessive-clones for rust {
   summary "Function contains multiple clone calls"
@@ -110,10 +110,10 @@ test rust/excessive-clones "reports excessive clones" {
   });
 
   test("Rust, Go, PowerShell, and Zig share compact nearest-owner counting", async () => {
-    const result = await inspect({ paths: [fixtureRoot], threshold: 1 });
+    const result = await inspect({ paths: [fixtureRoot], rulePaths: [exampleRulePack], threshold: 1 });
     const findings = records(result);
     expect(result.languages).toEqual(["go", "powershell", "rust", "zig"]);
-    expect(result.scannedFiles).toBe(4);
+    expect(result.checkedFiles).toBe(4);
     expect(result.diagnostics).toEqual([]);
     expect(result.findingCount).toBe(9);
     expect(findings).toHaveLength(9);
@@ -158,7 +158,7 @@ test rust/excessive-clones "reports excessive clones" {
 
     const result = await inspect({ paths: [source], rulePaths: [rule] });
     expect(result.languages).toEqual(["python"]);
-    expect(result.scannedFiles).toBe(1);
+    expect(result.checkedFiles).toBe(1);
     expect(result.diagnostics).toEqual([]);
     expect(records(result).map((finding) => [finding.rule.language, finding.observed]))
       .toEqual([["python", 2]]);
@@ -171,7 +171,7 @@ test rust/excessive-clones "reports excessive clones" {
     const findings = records(result);
 
     expect(result.languages).toEqual(["zig"]);
-    expect(result.scannedFiles).toBe(1);
+    expect(result.checkedFiles).toBe(1);
     expect(result.diagnostics).toEqual([]);
     expect(result.findingCount).toBe(1);
     expect(findings).toHaveLength(1);
@@ -190,7 +190,7 @@ test rust/excessive-clones "reports excessive clones" {
     const findings = records(result);
 
     expect(result.languages).toEqual(["powershell"]);
-    expect(result.scannedFiles).toBe(1);
+    expect(result.checkedFiles).toBe(1);
     expect(result.diagnostics).toEqual([]);
     expect(result.findingCount).toBe(1);
     expect(findings).toHaveLength(1);
@@ -209,16 +209,16 @@ test rust/excessive-clones "reports excessive clones" {
     const result = await inspect({ paths: [source], rulePaths: [powershellRulePath] });
 
     expect(result.languages).toEqual(["powershell"]);
-    expect(result.scannedFiles).toBe(0);
+    expect(result.checkedFiles).toBe(0);
     expect(result.findingCount).toBe(0);
     expect(result.diagnostics).toHaveLength(1);
     expect(result.diagnostics[0]?.message).toContain("syntax errors");
   });
 
   test("counts lexical sites, respects strict greater-than, and is reproducible", async () => {
-    expect((await inspect({ paths: [fixtureRoot], threshold: 2 })).findingCount).toBe(0);
-    const first = await inspect({ paths: [fixtureRoot], threshold: 0 });
-    const second = await inspect({ paths: [fixtureRoot, fixtureRoot], threshold: 0 });
+    expect((await inspect({ paths: [fixtureRoot], rulePaths: [exampleRulePack], threshold: 2 })).findingCount).toBe(0);
+    const first = await inspect({ paths: [fixtureRoot], rulePaths: [exampleRulePack], threshold: 0 });
+    const second = await inspect({ paths: [fixtureRoot, fixtureRoot], rulePaths: [exampleRulePack], threshold: 0 });
     expect(second.files).toEqual(first.files);
     expect(second.rules).toEqual(first.rules);
     expect([...second.findings]).toEqual([...first.findings]);
@@ -226,10 +226,12 @@ test rust/excessive-clones "reports excessive clones" {
   });
 
   test("rejects invalid scalar options instead of coercing them", async () => {
-    await expect(inspect({ paths: [fixtureRoot], threshold: -1 })).rejects.toThrow();
-    await expect(inspect({ paths: [fixtureRoot], threshold: 1.5 })).rejects.toThrow();
-    await expect(inspect({ paths: [] })).rejects.toThrow();
-    await expect(inspect({ paths: [fixtureRoot], maxFindings: 0x1_0000_0000 })).rejects.toThrow();
+    await expect(inspect({ paths: [fixtureRoot], rulePaths: [exampleRulePack], threshold: -1 })).rejects.toThrow();
+    await expect(inspect({ paths: [fixtureRoot], rulePaths: [exampleRulePack], threshold: 1.5 })).rejects.toThrow();
+    await expect(inspect({ paths: [], rulePaths: [exampleRulePack] })).rejects.toThrow();
+    await expect(inspect({
+      paths: [fixtureRoot], rulePaths: [exampleRulePack], maxFindings: 0x1_0000_0000,
+    })).rejects.toThrow();
   });
 
   test("changing only YAML selects different syntax and metadata", async () => {
@@ -262,7 +264,7 @@ test rust/excessive-clones "reports excessive clones" {
     await Bun.write(join(root, "unrelated.ts"), "not even valid TypeScript");
     const result = await inspect({ paths: [root], rulePaths: [rustRulePath] });
     expect(result.languages).toEqual(["go", "rust", "typescript"]);
-    expect(result.scannedFiles).toBe(2);
+    expect(result.checkedFiles).toBe(2);
     expect(result.diagnostics).toEqual([]);
     expect(new Set(records(result).map((finding) => finding.file)).size).toBe(2);
   });
@@ -278,8 +280,8 @@ test rust/excessive-clones "reports excessive clones" {
       await Bun.write(join(root, directory, "excluded.rs"), source);
     }
     await symlink(root, join(root, "loop"), "dir");
-    const result = await inspect({ paths: [root] });
-    expect(result.scannedFiles).toBe(1);
+    const result = await inspect({ paths: [root], rulePaths: [rustRulePath] });
+    expect(result.checkedFiles).toBe(1);
     expect(result.findingCount).toBe(1);
     expect(records(result)[0]?.file).toEndWith("/kept.rs");
   });
@@ -287,8 +289,8 @@ test rust/excessive-clones "reports excessive clones" {
   test("syntax errors produce diagnostics without partial findings", async () => {
     const root = await temporaryRoot();
     await Bun.write(join(root, "broken.rs"), "fn broken() { value.clone(); value.clone(); fn (");
-    const result = await inspect({ paths: [root] });
-    expect(result.scannedFiles).toBe(0);
+    const result = await inspect({ paths: [root], rulePaths: [rustRulePath] });
+    expect(result.checkedFiles).toBe(0);
     expect(result.findings.length).toBe(0);
     expect(result.diagnostics).toHaveLength(1);
     expect(result.diagnostics[0]?.message).toContain("syntax errors");
@@ -316,7 +318,7 @@ test rust/excessive-clones "reports excessive clones" {
     }
     await expect(inspect({ paths: [fixtureRoot], rulePaths: [] })).rejects.toThrow("rulePaths");
     await expect(inspect({ paths: [fixtureRoot], rulePaths: [rustRulePath, rustRulePath] })).rejects.toThrow("duplicate rule ID");
-    await expect(inspect({ paths: [join(root, "missing")], rulePaths: [goRulePath] })).rejects.toThrow("scan path");
+    await expect(inspect({ paths: [join(root, "missing")], rulePaths: [goRulePath] })).rejects.toThrow("source path");
     await expect(inspect({ paths: [fixtureRoot], rulePaths: [join(root, "missing.yaml")] })).rejects.toThrow("rule");
   });
 
@@ -393,7 +395,7 @@ test rust/excessive-clones "reports excessive clones" {
       await Bun.write(join(root, `${index}.rs`), `fn owner_${index}() { a.clone(); b.clone(); }`);
     }
     const result = await inspect({ paths: [root], rulePaths: [rustRulePath], profile: true });
-    expect(result.scannedFiles).toBe(8);
+    expect(result.checkedFiles).toBe(8);
     expect(result.performance?.workerThreads).toBeGreaterThanOrEqual(1);
     expect(result.performance?.workerThreads).toBeLessThanOrEqual(4);
   });
@@ -412,7 +414,7 @@ test rust/excessive-clones "reports excessive clones" {
   });
 
   test("profiles aggregation and compact output construction separately", async () => {
-    const result = await inspect({ paths: [fixtureRoot], profile: true });
+    const result = await inspect({ paths: [fixtureRoot], rulePaths: [exampleRulePack], profile: true });
     expect(result.performance?.aggregationMs).toBeGreaterThanOrEqual(0);
     expect(result.performance?.outputBuildMs).toBeGreaterThanOrEqual(0);
     expect(result.performance?.resultMergeMs).toBeGreaterThanOrEqual(0);

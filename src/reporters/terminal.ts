@@ -1,6 +1,6 @@
-import { iterateFindings, type ScanResult } from "../scanner/index.ts";
+import { iterateFindings, type CheckResult } from "../scanner/index.ts";
 
-export function reportScan(result: ScanResult): void {
+export function reportCheck(result: CheckResult): void {
   for (const finding of iterateFindings(result)) {
     console.log(`${finding.file}:${finding.ownerStart}-${finding.ownerEnd} ` +
       `[${finding.rule.severity}] ${finding.rule.id}: ` +
@@ -12,6 +12,6 @@ export function reportScan(result: ScanResult): void {
   }
   const returnedCount = result.findings.length / result.recordWidth;
   const returned = result.truncated ? ` (${returnedCount} returned)` : "";
-  console.log(`${result.scannedFiles} files scanned, ${result.findingCount} findings${returned}, ` +
+  console.log(`${result.checkedFiles} files checked, ${result.findingCount} findings${returned}, ` +
     `${result.diagnostics.length} diagnostics`);
 }

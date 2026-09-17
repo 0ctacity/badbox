@@ -1,4 +1,4 @@
-badbox 1
+#badbox 1
 
 rule zig/excessive-as-casts for zig {
   summary "Function contains multiple @as cast calls"

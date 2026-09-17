@@ -209,7 +209,7 @@ pub struct ScanMetadata {
     pub languages: Vec<Language>,
     pub files: Vec<String>,
     pub rules: Vec<RuleMetadata>,
-    pub scanned_files: usize,
+    pub checked_files: usize,
     pub finding_count: usize,
     pub truncated: bool,
     pub diagnostics: Vec<Diagnostic>,

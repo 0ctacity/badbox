@@ -1,6 +1,6 @@
-# Rule frontends (experimental version 1)
+# Rule examples (experimental version 1)
 
-Rules are data, not TypeScript callbacks. The bundled probes use `.badbox` files
+Rules are data, not TypeScript callbacks. The DSL examples use `.badbox` files
 written in the Rust-parsed [tiny DSL](../native/tiny-dsl/README.md). That README
 is the DSL reference.
 
@@ -26,11 +26,11 @@ evidence:
   subject: clone call sites
 ```
 
-The [Go YAML equivalent](go/excessive-goroutines.yaml) uses the same schema and evaluator,
+The [Go YAML equivalent](yaml/go/excessive-goroutines.yaml) uses the same schema and evaluator,
 with `select: { kind: go_statement }` and Go's callable node kinds.
-The [Zig probe](zig/excessive-as-casts.yaml) counts `@as` patterns inside Zig
+The [Zig probe](yaml/zig/excessive-as-casts.yaml) counts `@as` patterns inside Zig
 function declarations through that same pipeline.
-The [PowerShell probe](powershell/excessive-invoke-expression.yaml) counts
+The [PowerShell probe](yaml/powershell/excessive-invoke-expression.yaml) counts
 `Invoke-Expression` calls inside PowerShell functions. PowerShell patterns use
 uppercase `#NAME` captures so ordinary `$name` and `$NAME` variables remain
 literal syntax. Lowercase hash capture names are rejected.
@@ -54,7 +54,7 @@ literal syntax. Lowercase hash capture names are rejected.
 - `owner.nearest` is a nonempty set of allowed ancestor kinds. Each match is
   assigned to its nearest **strict ancestor** in that set. A match without an
   owner is ignored. Order does not change the result. Rules must include all
-  boundaries they intend to respect; the bundled probes include closures and
+  boundaries they intend to respect; the example probes include closures and
   anonymous functions, so their contents do not inflate enclosing counts.
 - `aggregate: count` counts distinct matched node ranges per owner. Owner
   identity is file plus range, never the function name. Overlapping ranges of
@@ -71,10 +71,10 @@ literal syntax. Lowercase hash capture names are rejected.
 ## Results
 
 `inspect()` returns `languages`, interned `files` and `rules` tables,
-`scannedFiles`, `findingCount`, compact `findings`, `truncated`, and
+`checkedFiles`, `findingCount`, compact `findings`, `truncated`, and
 `diagnostics`.
 `languages` lists supported languages discovered, even if no loaded rule targets
-one. `scannedFiles` counts error-free files actually analyzed with relevant rules.
+one. `checkedFiles` counts error-free files actually analyzed with relevant rules.
 
 `findings` is a flat `Uint32Array` with a record width of five:
 `fileId`, `ruleId`, `ownerStart`, `ownerEnd`, and exact `observed` count. File
@@ -86,7 +86,7 @@ remains exact.
 
 Owner offsets are zero-based UTF-8 bytes and end-exclusive. They are not
 JavaScript UTF-16 string indices. Line/column presentation is intentionally not
-materialized in the scan result.
+materialized in the check result.
 
 Files and returned findings are sorted deterministically; repeated/overlapping input
 paths do not duplicate files. Syntax-error files generate a diagnostic and no

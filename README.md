@@ -4,18 +4,44 @@ Badbox is a deterministic bad-pattern detector for codebases. It reports
 suspicious structural evidence and leaves the decision to a developer or coding
 agent.
 
-This development checkout implements four capability probes:
+The repository includes four example rules:
 `rust/excessive-clones`, `go/excessive-goroutines`,
 `powershell/excessive-invoke-expression`, and `zig/excessive-as-casts`. All four
 use the same native ownership, counting, threshold, and evidence pipeline. The
-bundled rules use Badbox's Rust-parsed [tiny DSL](native/tiny-dsl/README.md).
+examples use Badbox's Rust-parsed [tiny DSL](native/tiny-dsl/README.md).
 The DSL and the optional YAML frontend both compile to a Badbox-owned rule IR;
 TypeScript does not perform matching or aggregation.
 
-The published npm `0.0.1` is still the earlier scaffold. The next release will
-install a prebuilt native engine through one of five optional platform packages:
+The npm `0.1.0` release installs a prebuilt native engine through one of five
+optional platform packages:
 `badbox-darwin-arm64`, `badbox-darwin-x64`, `badbox-linux-arm64-gnu`,
 `badbox-linux-x64-gnu`, or `badbox-windows-x64`.
+
+## Install and check
+
+Each project owns its rules under `.badbox/`. Badbox recursively loads every
+`.badbox`, `.yaml`, and `.yml` rule file there. It never runs example or built-in
+policy automatically.
+
+```bash
+bun add --dev badbox
+bunx badbox create rust-rules.badbox
+bunx badbox check
+```
+
+`create` writes `.badbox/rust-rules.badbox` with the current `#badbox` format
+header and an editable Rust example. Users replace or remove the example and
+write their own rules. Badbox refuses to overwrite an existing file.
+
+Source paths are optional and default to the current project:
+
+```bash
+bunx badbox check src packages
+```
+
+The [example rules](examples/rules) are runnable DSL references, not defaults.
+YAML equivalents live separately under [examples/yaml](examples/yaml), so each
+directory can be loaded without duplicate rule IDs.
 
 ## Try the development checkout
 
@@ -25,18 +51,21 @@ The native build has been verified on macOS arm64; other platforms are unverifie
 ```bash
 bun install
 bun run build:native
-bun run scan tests/fixtures/counts
+bun run src/cli.ts create rust-rules.badbox
+bun run check tests/fixtures/counts
 ```
 
-Scan explicit source roots, for example with Zova checked out beside Badbox:
+To check another project, run Badbox from that project so its `.badbox/`
+directory supplies the rules:
 
 ```bash
-bun run scan ../zova/bindings/rust/zova/src ../zova/bindings/go
+cd ../zova
+bunx badbox check bindings/rust/zova/src bindings/go
 ```
 
-`badbox scan [path ...]` defaults to the working directory. It prints findings
-and a scan summary. Findings do not cause a nonzero exit; invalid input, I/O
-failures, or syntax diagnostics do. There are no CLI flags in this slice.
+`badbox check [path ...]` prints findings and a check summary. Findings do not
+cause a nonzero exit; a missing or invalid `.badbox/` rule pack, invalid input,
+I/O failures, or syntax diagnostics do.
 
 ## Rule files and API
 
@@ -46,11 +75,11 @@ declarations. The current threshold of `> 1` is a probe setting, not a universal
 engineering recommendation. YAML remains supported as a compatibility frontend.
 
 ```ts
-import { inspect } from "badbox/scanner";
+import { inspect } from "badbox/checker";
 
 const result = await inspect({
   paths: ["./src"],
-  rulePaths: ["./rules/my-pack"], // file or recursive directory pack
+  rulePaths: ["./.badbox"], // required file or recursive directory pack
   parameters: { "rust/excessive-clones.limit": 4 },
   threshold: 2, // optional override of every loaded rule's threshold
   profile: true, // optional phase timings and execution/cache counters
@@ -75,7 +104,7 @@ trait; no ast-grep nodes cross into evaluation or the public API. TypeScript
 only invokes the engine and parses the small metadata document.
 
 Within a process, compiled rules and parsed files use bounded, content-validated
-caches. Files are scanned in batches of at most four native workers. Completed
+caches. Files are checked in batches of at most four native workers. Completed
 batch results are merged before the next batch. Rules with the
 same language, selector, and owner boundary share one execution, and all unique
 selectors for a language are dispatched during one AST traversal per file. Final
@@ -98,9 +127,9 @@ findings are sorted after parallel work, preserving deterministic output.
   Swift, TSX, TypeScript, and YAML, plus Badbox's statically linked PowerShell
   and Zig parsers.
   File extensions select relevant rules; this is not framework or dependency
-  detection. The bundled probes target Rust, Go, PowerShell, and Zig.
+  detection. The repository examples target Rust, Go, PowerShell, and Zig.
 - Syntax-error files yield diagnostics and no partial findings. Unreadable files
-  fail the scan. Zero-count owners are not returned.
+  fail the check. Zero-count owners are not returned.
 - File parallelism is bounded at four workers. Caches are process-local and
   bounded; they do not survive a CLI process or avoid reading files to validate
   their contents. There is no filesystem watcher or cross-process cache.
@@ -129,15 +158,12 @@ Set the same new version in `package.json`, both native `Cargo.toml` files, and
 all five `optionalDependencies`, then commit and push it. Run the **Release npm
 packages** workflow with that version. It builds and tests each native target,
 creates and smoke-tests the tarballs, publishes the five platform packages, and
-publishes `badbox` last. The five new platform package names must be bootstrapped
-with a GitHub `release` environment secret named `NPM_TOKEN`; npm cannot attach
-a trusted publisher until a package exists. After that first release, configure
-this repository, `release.yml`, and the `release` environment as a trusted
-publisher for all six packages, then remove the token. Later releases use OIDC.
+publishes `badbox` last. Trusted publishing for all six packages authenticates
+the workflow through GitHub OIDC; no npm token is required.
 
 The workflow refuses to publish if the root `badbox` version already exists.
-Because `badbox@0.0.1` is already published, the first release through this
-pipeline must use a newer version.
+The first native release uses version `0.1.0` consistently across all six npm
+packages and both Rust manifests.
 
 ## Development checks
 
@@ -172,5 +198,6 @@ the [optimization report](benchmarks/OPTIMIZATION.md).
 - `native/src/evaluator.rs` — language-independent aggregation and evidence
 - `src/rules/` — legacy callback and base finding contracts
 - `src/reporters/` — terminal output and reserved JSON reporter interface
-- `rules/` — bundled DSL capability probes and optional YAML equivalents
+- `examples/rules/` — runnable DSL examples, never loaded automatically
+- `examples/yaml/` — equivalent YAML compatibility examples
 - `tests/` — integration tests and syntax fixtures

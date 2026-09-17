@@ -1,4 +1,4 @@
-badbox 1
+#badbox 1
 
 rule go/excessive-goroutines for go {
   summary "Function contains more goroutine launch sites than the configured threshold"

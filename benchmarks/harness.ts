@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { iterateFindings, type InspectOptions, type PerformanceProfile, type ScanResult } from "../src/scanner/index.ts";
+import { iterateFindings, type CheckResult, type InspectOptions, type PerformanceProfile } from "../src/scanner/index.ts";
 
 export type Language = "rust" | "go";
 export type Density = "sparse" | "dense";
@@ -45,7 +45,7 @@ export function makeRules(language: Language, density: Density, count: number) {
 }
 
 /** Hash every compact owner/count record. Rule IDs are map keys, not part of each digest. */
-export function fingerprints(result: ScanResult): Record<string, string> {
+export function fingerprints(result: CheckResult): Record<string, string> {
   if (result.diagnostics.length) throw new Error(`benchmark scan has diagnostics: ${JSON.stringify(result.diagnostics)}`);
   if (result.truncated) throw new Error("benchmark scan unexpectedly truncated full-output validation");
   const hashes = new Map<string, ReturnType<typeof createHash>>();
@@ -72,7 +72,7 @@ export function summarize(values: readonly number[]) {
 export interface WorkerConfig {
   options: InspectOptions;
   expected: Record<string, string>;
-  scannedFiles: number;
+  checkedFiles: number;
   warmups: number;
   samples: number;
   profile?: boolean;

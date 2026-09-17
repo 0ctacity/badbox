@@ -1,4 +1,4 @@
-badbox 1
+#badbox 1
 
 rule rust/excessive-clones for rust {
   summary "Function contains more clone call sites than the configured threshold"

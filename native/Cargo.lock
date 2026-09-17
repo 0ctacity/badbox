@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "badbox-native"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "ast-grep-core",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "tiny-dsl"
-version = "0.0.1"
+version = "0.1.0"
 
 [[package]]
 name = "toml_datetime"
