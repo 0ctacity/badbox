@@ -1,26 +1,21 @@
 export { detectProject } from "./detect.ts";
 
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { findingRecord, findingRecordWidth } from "./types.ts";
 import type { FindingRecord, InspectOptions, ScanResult } from "./types.ts";
+import { loadNativeEngine } from "./native.ts";
 
 export type {
   FindingRecord, InspectOptions, PerformanceProfile, RuleMetadata, ScanLanguage, ScanResult, ScanSeverity,
 } from "./types.ts";
 export { findingRecord, findingRecordWidth };
 
-const require = createRequire(import.meta.url);
 const defaultRulePaths = [
   "../../rules/rust/excessive-clones.badbox",
   "../../rules/go/excessive-goroutines.badbox",
   "../../rules/powershell/excessive-invoke-expression.badbox",
   "../../rules/zig/excessive-as-casts.badbox",
 ].map((path) => fileURLToPath(new URL(path, import.meta.url)));
-
-interface NativeEngine {
-  inspect(request: string): Promise<{ metadata: string; findings: Uint32Array }>;
-}
 
 /** Load rule files and scan in Rust. No AST nodes or per-rule callbacks cross this boundary. */
 export async function inspect(options: InspectOptions): Promise<ScanResult> {
@@ -40,12 +35,7 @@ export async function inspect(options: InspectOptions): Promise<ScanResult> {
       throw new TypeError(`parameter ${key} must be an unsigned 32-bit integer, boolean, or string`);
     }
   }
-  let native: NativeEngine;
-  try {
-    native = require("../../native/build/badbox.node") as NativeEngine;
-  } catch (cause) {
-    throw new Error("Cannot load Badbox native engine. In a source checkout, run bun run build:native.", { cause });
-  }
+  const native = loadNativeEngine();
   const response = await native.inspect(JSON.stringify({
     paths: options.paths,
     rulePaths: options.rulePaths ?? defaultRulePaths,

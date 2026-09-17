@@ -1,0 +1,152 @@
+name: Release npm packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version already set in package.json and Cargo.toml files
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Validate release versions
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bun run scripts/validate-release.ts "$RELEASE_VERSION"
+
+  build-native:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            package: badbox-darwin-x64
+          - runner: macos-latest
+            package: badbox-darwin-arm64
+          - runner: ubuntu-latest
+            package: badbox-linux-x64-gnu
+          - runner: ubuntu-24.04-arm
+            package: badbox-linux-arm64-gnu
+          - runner: windows-latest
+            package: badbox-windows-x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run build:native
+      - run: bun run typecheck
+      - run: bun test
+      - name: Name native artifact
+        shell: bash
+        run: |
+          mkdir -p release/artifacts
+          cp native/build/badbox.node "release/artifacts/${{ matrix.package }}.node"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package }}
+          path: release/artifacts/${{ matrix.package }}.node
+          if-no-files-found: error
+
+  package:
+    needs: build-native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          path: release/artifacts
+          merge-multiple: true
+      - run: bun install --frozen-lockfile
+      - run: bun run package:platforms
+      - name: Pack all npm packages
+        shell: bash
+        run: |
+          mkdir -p release/packages
+          for directory in release/npm/*; do
+            npm pack "$directory" --pack-destination release/packages
+          done
+          npm pack . --pack-destination release/packages
+      - name: Smoke-test installed Linux packages
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          mkdir release/smoke
+          cd release/smoke
+          npm init -y
+          npm install --ignore-scripts \
+            "../packages/badbox-linux-x64-gnu-${RELEASE_VERSION}.tgz" \
+            "../packages/badbox-${RELEASE_VERSION}.tgz"
+          bun -e 'import { inspect, iterateFindings } from "badbox/scanner"; await Bun.write("sample.rs", "fn example() { let a = value.clone(); let b = value.clone(); }"); const result = await inspect({ paths: ["sample.rs"] }); if ([...iterateFindings(result)].length !== 1) throw new Error("installed-package scan failed");'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-packages
+          path: release/packages/*.tgz
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-packages
+          path: release/packages
+      - run: npm install --global npm@^11.15.0
+      - name: Publish native packages, then Badbox
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if npm view "badbox@${RELEASE_VERSION}" version >/dev/null 2>&1; then
+            echo "badbox@${RELEASE_VERSION} already exists; refusing to create orphan platform packages."
+            exit 1
+          fi
+
+          TAG=latest
+          if [[ "$RELEASE_VERSION" == *-* ]]; then TAG=next; fi
+
+          for package in \
+            badbox-darwin-arm64 \
+            badbox-darwin-x64 \
+            badbox-linux-arm64-gnu \
+            badbox-linux-x64-gnu \
+            badbox-windows-x64; do
+            if npm view "${package}@${RELEASE_VERSION}" version >/dev/null 2>&1; then
+              echo "${package}@${RELEASE_VERSION} is already published; continuing."
+            else
+              npm publish "release/packages/${package}-${RELEASE_VERSION}.tgz" --access public --provenance --tag "$TAG"
+            fi
+          done
+
+          npm publish "release/packages/badbox-${RELEASE_VERSION}.tgz" --access public --provenance --tag "$TAG"

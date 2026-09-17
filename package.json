@@ -40,6 +40,8 @@
   "scripts": {
     "benchmark": "bun run benchmarks/run.ts",
     "build:native": "bun run scripts/build-native.ts",
+    "package:platforms": "bun run scripts/package-platforms.ts",
+    "release:check": "bun run scripts/validate-release.ts",
     "scan": "bun run src/cli.ts scan",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
@@ -47,5 +49,12 @@
   "devDependencies": {
     "@types/bun": "1.3.14",
     "typescript": "5.9.3"
+  },
+  "optionalDependencies": {
+    "badbox-darwin-arm64": "0.0.1",
+    "badbox-darwin-x64": "0.0.1",
+    "badbox-linux-arm64-gnu": "0.0.1",
+    "badbox-linux-x64-gnu": "0.0.1",
+    "badbox-windows-x64": "0.0.1"
   }
 }

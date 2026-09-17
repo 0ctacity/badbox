@@ -12,8 +12,10 @@ bundled rules use Badbox's Rust-parsed [tiny DSL](native/tiny-dsl/README.md).
 The DSL and the optional YAML frontend both compile to a Badbox-owned rule IR;
 TypeScript does not perform matching or aggregation.
 
-The published npm `0.0.1` is still the earlier scaffold. The native scanner is
-experimental, source-build only, and has not been released.
+The published npm `0.0.1` is still the earlier scaffold. The next release will
+install a prebuilt native engine through one of five optional platform packages:
+`badbox-darwin-arm64`, `badbox-darwin-x64`, `badbox-linux-arm64-gnu`,
+`badbox-linux-x64-gnu`, or `badbox-windows-x64`.
 
 ## Try the development checkout
 
@@ -107,8 +109,23 @@ findings are sorted after parallel work, preserving deterministic output.
   native buffer linearly at 20 bytes per returned finding.
 - Relational DSL conditions are parsed but rejected explicitly until native
   relational evaluation exists. SQL parsing, cancellation evidence, additional aggregates, and
-  prebuilt native npm packages are not implemented. Rule format version `1` is
-  experimental.
+  Rule format version `1` is experimental.
+
+## Releasing to npm
+
+Set the same new version in `package.json`, both native `Cargo.toml` files, and
+all five `optionalDependencies`, then commit and push it. Run the **Release npm
+packages** workflow with that version. It builds and tests each native target,
+creates and smoke-tests the tarballs, publishes the five platform packages, and
+publishes `badbox` last. The five new platform package names must be bootstrapped
+with a GitHub `release` environment secret named `NPM_TOKEN`; npm cannot attach
+a trusted publisher until a package exists. After that first release, configure
+this repository, `release.yml`, and the `release` environment as a trusted
+publisher for all six packages, then remove the token. Later releases use OIDC.
+
+The workflow refuses to publish if the root `badbox` version already exists.
+Because `badbox@0.0.1` is already published, the first release through this
+pipeline must use a newer version.
 
 ## Development checks
 

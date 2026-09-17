@@ -39,6 +39,9 @@ native/tiny-dsl/target/
 native/tiny-dsl/Cargo.lock
 native/build/
 
+# generated npm release packages
+release/
+
 # local benchmark output
 benchmarks/results/
 
