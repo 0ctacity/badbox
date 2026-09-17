@@ -568,6 +568,29 @@ fn discover(paths: &[String]) -> Result<BTreeSet<PathBuf>> {
     Ok(files)
 }
 
+#[cfg(any(windows, test))]
+fn without_windows_extended_prefix(path: &str) -> String {
+    if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{path}")
+    } else {
+        path.strip_prefix(r"\\?\").unwrap_or(path).to_owned()
+    }
+}
+
+fn user_facing_path_text(path: &str) -> String {
+    #[cfg(windows)]
+    return without_windows_extended_prefix(path);
+
+    #[cfg(not(windows))]
+    path.to_owned()
+}
+
+fn user_facing_path(path: &Path) -> Result<String> {
+    path.to_str()
+        .context("source path is not valid UTF-8")
+        .map(user_facing_path_text)
+}
+
 fn parsed_file(path: &Path, source: &str, language: Language) -> Result<(Arc<ParsedFile>, bool)> {
     let cache = PARSE_CACHE.get_or_init(|| Mutex::new(ParseCache::default()));
     {
@@ -651,7 +674,7 @@ fn scan_file(
     plan: &[ExecutionGroup],
     settings: FileScanSettings,
 ) -> Result<FileScan> {
-    let file_name = file.to_str().context("source path is not valid UTF-8")?;
+    let file_name = user_facing_path(file)?;
     let read_started = Instant::now();
     let source = fs::read_to_string(file).with_context(|| format!("reading {file_name}"))?;
     let read = if settings.profile {
@@ -680,7 +703,7 @@ fn scan_file(
         Err(error) => {
             let mut scan = FileScan {
                 diagnostics: vec![Diagnostic {
-                    file: file_name.to_owned(),
+                    file: file_name.clone(),
                     message: error.to_string(),
                 }],
                 timings: FileTimings {
@@ -813,11 +836,7 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
     );
     let file_names = file_list
         .iter()
-        .map(|path| {
-            path.to_str()
-                .context("source path is not valid UTF-8")
-                .map(str::to_owned)
-        })
+        .map(|path| user_facing_path(path))
         .collect::<Result<Vec<_>>>()?;
     let pool = scan_pool()?;
     let mut performance = PerformanceProfile {
@@ -969,4 +988,25 @@ impl Task for InspectTask {
 #[napi]
 pub fn inspect(request: String) -> AsyncTask<InspectTask> {
     AsyncTask::new(InspectTask(request))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::without_windows_extended_prefix;
+
+    #[test]
+    fn windows_extended_paths_are_rendered_as_normal_user_paths() {
+        assert_eq!(
+            without_windows_extended_prefix(r"\\?\C:\work\source.rs"),
+            r"C:\work\source.rs"
+        );
+        assert_eq!(
+            without_windows_extended_prefix(r"\\?\UNC\server\share\source.rs"),
+            r"\\server\share\source.rs"
+        );
+        assert_eq!(
+            without_windows_extended_prefix("/work/source.rs"),
+            "/work/source.rs"
+        );
+    }
 }

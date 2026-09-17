@@ -27,7 +27,7 @@ test("frozen Zova labels match exact compact owner ranges and counts", async () 
   expect(result.checkedFiles).toBe(30);
   const expected = [];
   for (const entry of corpus.cases) {
-    const file = `${root}/source/${entry.file}`;
+    const file = join(root, "source", entry.file);
     const source = await Bun.file(file).text();
     expect(createHash("sha256").update(source).digest("hex")).toBe(entry.sha256);
     const bytes = Buffer.from(source);
