@@ -1,217 +1,395 @@
 # Badbox
 
-Badbox is a deterministic bad-pattern detector for codebases. It reports
-suspicious structural evidence and leaves the decision to a developer or coding
-agent.
+Deterministic bad-pattern detection for codebases.
 
-The repository includes four example rules:
-`rust/excessive-clones`, `go/excessive-goroutines`,
-`powershell/excessive-invoke-expression`, and `zig/excessive-as-casts`. All four
-use the same native ownership, counting, threshold, and evidence pipeline. The
-examples use Badbox's Rust-parsed [tiny DSL](native/tiny-dsl/README.md).
-The DSL and the optional YAML frontend both compile to a Badbox-owned rule IR;
-TypeScript does not perform matching or aggregation.
+Badbox lets a repository encode questionable engineering patterns as structural rules, then check
+for them without an LLM. It reports evidence—where a pattern occurred, who owns it, and how often—
+while leaving the decision to a developer or coding agent.
 
-The npm `0.3.0` release installs a prebuilt native engine through one of five
-optional platform packages:
-`badbox-darwin-arm64`, `badbox-darwin-x64`, `badbox-linux-arm64-gnu`,
-`badbox-linux-x64-gnu`, or `badbox-windows-x64`.
+Badbox ships no default policies and performs no automatic rewriting. Each project owns its rules
+under `.badbox/`.
 
-## Install and check
+Current npm version: `0.3.0`
 
-Each project owns its rules under `.badbox/`. Badbox recursively loads every
-`.badbox`, `.yaml`, and `.yml` rule file there. It never runs example or built-in
-policy automatically.
+Current rule format: `#badbox 1` (experimental)
+
+## Contents
+
+- [Install](#install)
+- [Quick start](#quick-start)
+- [How Badbox works](#how-badbox-works)
+- [Write rules](#write-rules)
+- [Capabilities](#capabilities)
+- [Supported languages](#supported-languages)
+- [CLI](#cli)
+- [Programmatic API](#programmatic-api)
+- [Architecture](#architecture)
+- [Current boundaries](#current-boundaries)
+- [Development](#development)
+- [Releasing](#releasing)
+- [License](#license)
+
+## Install
+
+Badbox requires [Bun](https://bun.sh/) 1.3.14 or newer.
+
+Install it in a project:
 
 ```bash
 bun add --dev badbox
-bunx badbox create rust-rules.badbox
+```
+
+Then run it through `bunx`:
+
+```bash
 bunx badbox check
 ```
 
-`create` writes `.badbox/rust-rules.badbox` with the current `#badbox` format
-header and an editable Rust example. Users replace or remove the example and
-write their own rules. Badbox refuses to overwrite an existing file.
+You can also install the CLI globally:
 
-Source paths are optional and default to the current project:
+```bash
+bun add --global badbox
+badbox check
+```
+
+Published packages include prebuilt native engines for these platforms:
+
+| Platform | Architecture | Native package |
+| --- | --- | --- |
+| macOS | Apple Silicon | `badbox-darwin-arm64` |
+| macOS | Intel | `badbox-darwin-x64` |
+| Linux GNU | arm64 | `badbox-linux-arm64-gnu` |
+| Linux GNU | x64 | `badbox-linux-x64-gnu` |
+| Windows | x64 | `badbox-windows-x64` |
+
+Installing from npm on a supported platform does not require a local Rust toolchain.
+
+## Quick start
+
+Run `create` from the root of the project you want to check:
+
+```bash
+bunx badbox create project-rules.badbox
+```
+
+Badbox creates `.badbox/project-rules.badbox` with the correct version header and an editable
+example. Replace that example with a rule for your project:
+
+```text
+#badbox 1
+
+rule rust/excessive-clones for rust {
+  summary "Function contains more clone calls than the configured limit"
+  param limit = 4
+
+  find code(value) `value.clone()`
+  group by nearest callable
+  when count > limit
+
+  report {
+    severity warning
+    message "Function contains excessive clone calls"
+    evidence "clone call sites"
+  }
+}
+```
+
+Check the project:
+
+```bash
+bunx badbox check
+```
+
+Or check specific source roots while still loading rules from the project's `.badbox/` directory:
 
 ```bash
 bunx badbox check src packages
 ```
 
-The [example rules](examples/rules) are runnable DSL references, not defaults.
-YAML equivalents live separately under [examples/yaml](examples/yaml), so each
-directory can be loaded without duplicate rule IDs.
+A finding is an observation, so findings do not make the command fail. Invalid rules, invalid
+input, unreadable files, I/O errors, and syntax diagnostics make the check incomplete and return a
+nonzero exit code.
 
-## Try the development checkout
+## How Badbox works
 
-Requires Bun 1.3.14+, Rust/Cargo, and a C compiler for Tree-sitter grammars.
-CI builds and tests the native engine on macOS arm64/x64, Linux arm64/x64 GNU,
-and Windows x64.
+A rule selects syntax, assigns each match to an owner, applies structural conditions, counts the
+remaining matches, and reports owners above a threshold.
+
+```text
+find -> where -> nearest owner -> distinct-range count -> threshold -> finding
+```
+
+This makes rules useful for patterns such as:
+
+- excessive cloning, casting, unwrapping, or goroutine creation per function;
+- syntax inside a loop or another structural boundary;
+- an owner that contains or lacks supporting evidence;
+- one statement following or preceding another in the same lexical block;
+- repository-specific architectural patterns that should not reappear.
+
+Badbox detects which supported languages occur under the requested source roots and runs only the
+relevant rules.
+
+## Write rules
+
+The tiny DSL is the primary rule format. Every file starts with a version header:
+
+```text
+#badbox 1
+```
+
+### Structural captures
+
+Names declared in `code(...)` become structural captures:
+
+```text
+find code(value) `value.clone()`
+```
+
+Undeclared identifiers remain literal source syntax. Captures can also be constrained by text:
+
+```text
+where text(method) in ["unwrap", "expect"]
+```
+
+Supported text operators are `==`, `!=`, `in`, `not in`, and `matches`.
+
+### Structural relations
+
+Rules can inspect containment and evidence around a selected match:
+
+```text
+where match inside any {
+  node for_statement
+  node while_statement
+}
+
+where group lacks any {
+  code(ctx) `ctx.cancel()`
+}
+```
+
+Ordering relations compare statements in the same nearest callable and lexical block:
+
+```text
+find code(statement) `statement.clearBindings()`
+group by nearest callable
+
+where match follows any {
+  code(statement) `statement.reset()`
+}
+```
+
+Repeating `statement` in both selectors requires the captured source text to be equal. Therefore,
+`first.reset()` does not satisfy a later `second.clearBindings()` match. Intervening sibling
+statements are allowed; nested callables and different branch, loop, switch, or error-handling
+blocks remain separate.
+
+See the [tiny DSL reference](native/tiny-dsl/README.md) for the complete grammar, validation rules,
+relations, parameters, and fixture declarations. Runnable DSL examples live under
+[`examples/rules`](examples/rules). YAML equivalents under [`examples/yaml`](examples/yaml) exercise
+the compatibility frontend; they are never loaded automatically.
+
+## Capabilities
+
+| Area | Supported today |
+| --- | --- |
+| Selection | Source-shaped `code(...)` patterns and raw syntax-node kinds |
+| Ownership | Nearest callable for Rust, Go, PowerShell, and Zig; explicit nearest node kinds elsewhere |
+| Capture predicates | `==`, `!=`, `in`, `not in`, and Rust-regex `matches` |
+| Containment | `where match inside any\|all` |
+| Owner evidence | `where group has any\|all` and `where group lacks any\|all` |
+| Ordering | Statement-level `follows` and `precedes` within one callable and lexical block |
+| Aggregation | Distinct selected ranges counted per owner with strict `count > threshold` |
+| Parameters | Rule-local scalar defaults with programmatic overrides |
+| Frontends | Tiny DSL plus YAML compatibility, both compiled to the same Badbox Rule IR |
+| Output | Deterministically ordered, bounded findings with exact total counts |
+
+## Supported languages
+
+Badbox bundles 30 parsers.
+
+The 28 ast-grep built-in languages are Bash, C, C++, C#, CSS, Dart, Elixir, Go, Haskell, HCL,
+HTML, Java, JavaScript/JSX, JSON, Kotlin, Lua, Markdown, Nix, PHP, Python, Ruby, Rust, Scala,
+Solidity, Swift, TSX, TypeScript, and YAML.
+
+Badbox also statically links PowerShell and Zig parsers.
+
+File extensions select relevant language rules. This is language detection, not framework,
+dependency, build-configuration, or semantic type detection.
+
+## CLI
+
+```text
+badbox create <name.badbox>
+badbox check [path ...]
+```
+
+### `create`
+
+Creates `.badbox/<name.badbox>` with the current version header and a Rust example. The name may
+include subdirectories under `.badbox/`. Badbox refuses absolute paths, parent traversal, names
+without the `.badbox` suffix, and existing files.
+
+### `check`
+
+Recursively loads `.badbox`, `.yaml`, and `.yml` rule files from the current project's `.badbox/`
+directory. With no source paths, it checks the current project. Explicit source paths narrow source
+discovery but do not change where rules are loaded from.
+
+Discovery respects ignore files and hidden paths, skips common build and vendor directories, and
+does not follow nested symlinks.
+
+## Programmatic API
+
+Use `badbox/checker` when another tool or coding agent needs structured results:
+
+```ts
+import { inspect, iterateFindings } from "badbox/checker";
+
+const result = await inspect({
+  paths: ["./src"],
+  rulePaths: ["./.badbox"],
+  parameters: {
+    "rust/excessive-clones.limit": 6,
+  },
+  maxFindings: 1_000,
+});
+
+for (const finding of iterateFindings(result)) {
+  console.log({
+    rule: finding.rule.id,
+    file: finding.file,
+    owner: [finding.ownerStart, finding.ownerEnd],
+    observed: finding.observed,
+  });
+}
+
+if (result.diagnostics.length > 0) {
+  console.error(result.diagnostics);
+}
+```
+
+`inspect()` also accepts:
+
+- `threshold` to replace every loaded rule's threshold;
+- `profile: true` to include phase timings and cache/execution counters;
+- `maxFindings` to bound returned records while retaining the exact `findingCount`.
+
+Findings are stored as five `u32` values: file ID, rule ID, owner start, owner end, and observed
+count. File paths and rule metadata are interned separately. Use `iterateFindings()` to decode the
+records without materializing another result array.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    CLI["CLI or TypeScript inspect()"]
+    Native["Native N-API boundary"]
+    Frontend["DSL or YAML frontend"]
+    IR["Badbox Rule IR"]
+    Plan["Per-language shared finder plan"]
+    Parser["Tree-sitter parsing and bounded caches"]
+    Match["ast-grep structural backend"]
+    Eval["Ownership, relations, counting, thresholds"]
+    Result["Compact findings and metadata"]
+
+    CLI --> Native --> Frontend --> IR --> Plan --> Parser --> Match --> Eval --> Result
+```
+
+Parsing, matching, ownership, relational evaluation, counting, thresholds, and compact result
+construction run in Rust. TypeScript invokes the native engine and decodes metadata.
+
+Badbox owns the Rule IR and structural-backend interface; ast-grep is an implementation detail.
+Identical primary and relational selectors are interned across a language plan and dispatched once
+per relevant AST node. Rule-specific predicates, ownership, thresholds, and reporting remain
+independent.
+
+File work uses at most four native workers. Compiled-rule, parsed-file, and compact-result caches
+are content-validated, process-local, and bounded. Parallel results are sorted before returning so
+output remains deterministic.
+
+## Current boundaries
+
+- Badbox reports lexical and structural evidence, not runtime behavior or developer intent.
+- There is no type resolution, macro expansion, conditional-compilation filtering, SQL query-plan
+  analysis, leak proof, or transaction-atomicity proof.
+- Counts describe syntax sites, not runtime execution counts or costs.
+- Immediate-sibling ordering is not implemented. `follows` and `precedes` allow intervening sibling
+  statements.
+- Ordering by nearest callable currently targets Rust, Go, PowerShell, and Zig.
+- Only strict greater-than count aggregation is implemented.
+- Syntax-error files produce diagnostics and no partial findings.
+- Caches do not survive a CLI process and still read file contents for validation.
+- Findings are bounded to 10,000 records by default. Increasing `maxFindings` adds 20 bytes per
+  returned finding.
+- Rule format version `1` remains experimental.
+
+## Development
+
+Building from source requires Bun, Rust/Cargo, `cargo-nextest`, and a C compiler for Tree-sitter
+grammars.
 
 ```bash
 bun install
 bun run build:native
-bun run src/cli.ts create rust-rules.badbox
-bun run check tests/fixtures/counts
+bun run ci
 ```
 
-To check another project, run Badbox from that project so its `.badbox/`
-directory supplies the rules:
+`bun run ci` is the canonical full check. It runs Rust formatting, Clippy, both `cargo-nextest`
+suites, the native release build, TypeScript checking, and all Bun tests.
 
-```bash
-cd ../zova
-bunx badbox check bindings/rust/zova/src bindings/go
-```
-
-`badbox check [path ...]` prints findings and a check summary. Findings do not
-cause a nonzero exit; a missing or invalid `.badbox/` rule pack, invalid input,
-I/O failures, or syntax diagnostics do.
-
-## Rule files and API
-
-The [tiny DSL](native/tiny-dsl/README.md) defines syntax selection, nearest
-ownership, counting, thresholds, structured reports, and external test fixture
-declarations. The current threshold of `> 1` is a probe setting, not a universal
-engineering recommendation. YAML remains supported as a compatibility frontend.
-
-```ts
-import { inspect } from "badbox/checker";
-
-const result = await inspect({
-  paths: ["./src"],
-  rulePaths: ["./.badbox"], // required file or recursive directory pack
-  parameters: { "rust/excessive-clones.limit": 4 },
-  threshold: 2, // optional override of every loaded rule's threshold
-  profile: true, // optional phase timings and execution/cache counters
-  maxFindings: 1_000, // optional; defaults to 10,000
-});
-
-console.log(result.findings);
-console.log(result.performance);
-```
-
-In this checkout, import from `./src/scanner/index.ts` instead. The legacy
-`defineRule()` export remains available, but its TypeScript callbacks are not
-executed by this scanner.
-
-One asynchronous native call compiles DSL or YAML rules into the Badbox rule IR, discovers
-files for 30 statically bundled languages, compiles selectors through the
-active structural backend, parses relevant files, assigns nearest owners,
-counts, and returns bounded five-integer records in a native `Uint32Array`.
-File paths and rule metadata are
-interned once in tables. The current backend uses ast-grep-core behind a Rust
-trait; no ast-grep nodes cross into evaluation or the public API. TypeScript
-only invokes the engine and parses the small metadata document.
-
-Within a process, compiled rules and parsed files use bounded, content-validated
-caches. Files are checked in batches of at most four native workers. Completed
-batch results are merged before the next batch. Rules with identical matching and
-owner conditions share one execution group, and all unique primary and relational
-selectors are interned into a shared finder plan. Each unique
-selector is dispatched during one AST traversal per file; rule-specific predicates,
-ownership, aggregation, thresholds, and reporting remain independent. Final
-findings are sorted after parallel work, preserving deterministic output.
-
-## Current boundaries
-
-- Counts are lexical syntax sites, not runtime executions or costs. No type
-  resolution, macro expansion, conditional-compilation filtering, or leak proof.
-- Nested Rust functions/closures and Go functions/methods/literals are separate
-  owners. Findings contain file/rule indexes, owner byte ranges, and exact counts;
-  thresholds and presentation metadata live in the rule table.
-- Discovery respects ignore files and hidden paths, skips common build/vendor
-  directories, and does not follow nested symlinks. Explicit roots opt into those
-  roots. Bundled source copies and tests are not automatically deduplicated or
-  separated: choose source roots deliberately.
-- The native backend supports all 28 parsers built into ast-grep 0.45.1: Bash,
-  C, C++, C#, CSS, Dart, Elixir, Go, Haskell, HCL, HTML, Java, JavaScript/JSX,
-  JSON, Kotlin, Lua, Markdown, Nix, PHP, Python, Ruby, Rust, Scala, Solidity,
-  Swift, TSX, TypeScript, and YAML, plus Badbox's statically linked PowerShell
-  and Zig parsers.
-  File extensions select relevant rules; this is not framework or dependency
-  detection. The repository examples target Rust, Go, PowerShell, and Zig.
-- Syntax-error files yield diagnostics and no partial findings. Unreadable files
-  fail the check. Zero-count owners are not returned.
-- File parallelism is bounded at four workers. Caches are process-local and
-  bounded; they do not survive a CLI process or avoid reading files to validate
-  their contents. There is no filesystem watcher or cross-process cache.
-- Findings are five `u32` values each and are bounded by default while exact
-  total and observed counts are retained. Raising `maxFindings` increases the
-  native buffer linearly at 20 bytes per returned finding.
-- Relational evaluation supports capture-text predicates, `match inside`,
-  `group has/lacks`, and statement-level `match follows/precedes` for Rust, Go,
-  PowerShell, and Zig callable groups. Ordering requires the same nearest callable
-  and the same lexical statement block; intervening sibling statements are allowed,
-  while nested callables and different branch/loop blocks remain isolated. `any`
-  requires one listed selector to qualify and `all` requires every listed selector
-  to have a qualifying occurrence. A capture name repeated in the primary and an
-  ordering selector requires their exact captured source text to match; capture
-  values are interned per file and never enter the five-integer finding record.
-  Immediate-sibling ordering and unsupported
-  target/relation combinations are rejected explicitly. There is no SQL parser
-  or semantic proof of cancellation, query-plan behavior, or transactional
-  atomicity. Additional aggregates are not implemented, and rule format version
-  `1` remains experimental.
-
-## Releasing to npm
-
-Reserve the five platform package names once from an npm-authenticated local
-shell. Inspect all five package payloads first, then publish version `0.0.0`
-under the non-default `bootstrap` tag:
-
-```bash
-bun run bootstrap:platform-packages --dry-run
-bun run bootstrap:platform-packages --publish
-```
-
-The bootstrap packages deliberately contain no native binaries. Their only
-purpose is to create the npm packages so trusted publishing can be configured.
-
-Set the same new version in `package.json`, both native `Cargo.toml` files, and
-all five `optionalDependencies`, then commit and push it. Run the **Release npm
-packages** workflow with that version. It builds and tests each native target,
-creates and smoke-tests the tarballs, publishes the five platform packages, and
-publishes `badbox` last. Trusted publishing for all six packages authenticates
-the workflow through GitHub OIDC; no npm token is required.
-
-The workflow refuses to publish if the root `badbox` version already exists.
-The `0.3.0` release uses the same version across all six npm packages and both
-Rust manifests.
-
-## Development checks
+After changing Rust, rebuild the `.node` addon before running Bun tests:
 
 ```bash
 bun run build:native
-bun test
-bun run typecheck
-cargo fmt --manifest-path native/Cargo.toml --check
-cargo clippy --manifest-path native/Cargo.toml --locked --all-targets -- -D warnings
-cargo nextest run --manifest-path native/Cargo.toml
-cargo nextest run --manifest-path native/tiny-dsl/Cargo.toml
+bun test tests/scanner.test.ts
 ```
 
-Rebuild after changing Rust. Bun tests exercise the actual native addon, including
-rule-only changes, cross-language ownership, threshold boundaries, owner byte
-ranges, duplicate owners, ignores, and diagnostics. No Zova checkout is required
-for tests.
+For reproducible latency, rule-scaling, and memory measurements:
 
-The [frozen Zova corpus](tests/fixtures/zova/README.md) adds independently
-source-labeled owner/count/range checks. For reproducible rule-count, latency,
-and memory measurements, see the [benchmark harness](benchmarks/README.md) and
-the [optimization report](benchmarks/OPTIMIZATION.md).
+```bash
+bun run build:native
+bun run benchmark
+bun run benchmark ../zova
+```
 
-## Project layout
+See the [benchmark methodology](benchmarks/README.md),
+[optimization report](benchmarks/OPTIMIZATION.md), and
+[frozen Zova corpus](tests/fixtures/zova/README.md).
 
-- `src/cli.ts` — CLI entry point
-- `src/scanner/` — thin native invocation and result types
-- `native/src/rule_ir.rs` — backend- and serialization-independent rule model
-- `native/tiny-dsl/` — Rust parser, syntax model, tests, and DSL reference
-- `native/src/frontends/` — DSL/YAML-to-IR compilation
-- `native/src/backend/` — structural contract and ast-grep implementation
-- `native/src/evaluator.rs` — language-independent aggregation and evidence
-- `src/rules/` — legacy callback and base finding contracts
-- `src/reporters/` — terminal output and reserved JSON reporter interface
-- `examples/rules/` — runnable DSL examples, never loaded automatically
-- `examples/yaml/` — equivalent YAML compatibility examples
-- `tests/` — integration tests and syntax fixtures
+### Project layout
+
+| Path | Purpose |
+| --- | --- |
+| `src/cli.ts` | `check` and `create` commands |
+| `src/scanner/` | Public TypeScript API and native-addon loading |
+| `native/src/rule_ir.rs` | Backend-independent rule model |
+| `native/src/frontends/` | DSL/YAML lowering and validation |
+| `native/src/backend/` | Structural backend contract and ast-grep implementation |
+| `native/src/evaluator.rs` | Language-independent aggregation and findings |
+| `native/tiny-dsl/` | Rust parser crate, tests, and DSL reference |
+| `examples/` | Runnable rules that are never defaults |
+| `tests/` | CLI, integration, packaging, corpus, and benchmark-contract tests |
+| `benchmarks/` | Reproducible performance harness and reports |
+
+## Releasing
+
+All six npm packages and both Rust manifests must use the same release version. Validate that
+invariant before publishing:
+
+```bash
+bun run scripts/validate-release.ts 0.3.0
+bun run ci
+```
+
+After committing and pushing the version, run the **Release npm packages** GitHub Actions workflow
+with that version. It builds and tests all five native targets, packages and smoke-tests the npm
+tarballs, publishes the platform packages first, and publishes `badbox` last.
+
+All six npm packages use npm trusted publishing through GitHub OIDC; no `NPM_TOKEN` is required.
+Stable versions publish under `latest`, while prerelease versions publish under `next`.
+
+## License
+
+[MIT](LICENSE) © 2026 Octacity
