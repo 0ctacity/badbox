@@ -43,6 +43,7 @@ describe("native platform package selection", () => {
 
 describe("platform package generation", () => {
   test("copies each binary into a publishable, platform-constrained package", async () => {
+    const rootManifest = await Bun.file(new URL("../package.json", import.meta.url)).json();
     const directory = await mkdtemp(join(tmpdir(), "badbox-release-test-"));
     temporaryDirectories.push(directory);
     const artifactsDir = join(directory, "artifacts");
@@ -64,7 +65,7 @@ describe("platform package generation", () => {
       const manifest = JSON.parse(await readFile(join(packageDirectory, "package.json"), "utf8"));
       expect(manifest).toMatchObject({
         name: platform.name,
-        version: "0.1.0",
+        version: rootManifest.version,
         main: "badbox.node",
         files: ["badbox.node"],
         os: [platform.os],
@@ -99,7 +100,8 @@ test("root package pins every native package to its own version", async () => {
 
 test("release validation requires one version across npm and Rust manifests", async () => {
   const root = fileURLToPath(new URL("../", import.meta.url));
-  await expect(validateRelease(root, "0.1.0")).resolves.toBeUndefined();
+  const manifest = await Bun.file(new URL("../package.json", import.meta.url)).json();
+  await expect(validateRelease(root, manifest.version)).resolves.toBeUndefined();
   await expect(validateRelease(root, "9.9.9")).rejects.toThrow("expected 9.9.9");
 });
 

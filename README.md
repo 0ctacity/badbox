@@ -12,7 +12,7 @@ examples use Badbox's Rust-parsed [tiny DSL](native/tiny-dsl/README.md).
 The DSL and the optional YAML frontend both compile to a Badbox-owned rule IR;
 TypeScript does not perform matching or aggregation.
 
-The npm `0.1.0` release installs a prebuilt native engine through one of five
+The npm `0.2.0` release installs a prebuilt native engine through one of five
 optional platform packages:
 `badbox-darwin-arm64`, `badbox-darwin-x64`, `badbox-linux-arm64-gnu`,
 `badbox-linux-x64-gnu`, or `badbox-windows-x64`.
@@ -46,7 +46,8 @@ directory can be loaded without duplicate rule IDs.
 ## Try the development checkout
 
 Requires Bun 1.3.14+, Rust/Cargo, and a C compiler for Tree-sitter grammars.
-The native build has been verified on macOS arm64; other platforms are unverified.
+CI builds and tests the native engine on macOS arm64/x64, Linux arm64/x64 GNU,
+and Windows x64.
 
 ```bash
 bun install
@@ -138,9 +139,11 @@ findings are sorted after parallel work, preserving deterministic output.
 - Findings are five `u32` values each and are bounded by default while exact
   total and observed counts are retained. Raising `maxFindings` increases the
   native buffer linearly at 20 bytes per returned finding.
-- Relational DSL conditions are parsed but rejected explicitly until native
-  relational evaluation exists. SQL parsing, cancellation evidence, additional aggregates, and
-  Rule format version `1` is experimental.
+- Relational evaluation supports capture-text predicates, `match inside`, and
+  `group has/lacks`. `follows`, `precedes`, and unsupported relation combinations
+  are rejected explicitly. There is no SQL parser or semantic proof of cancellation,
+  query-plan behavior, or transactional atomicity. Additional aggregates are not
+  implemented, and rule format version `1` remains experimental.
 
 ## Releasing to npm
 
@@ -164,8 +167,8 @@ publishes `badbox` last. Trusted publishing for all six packages authenticates
 the workflow through GitHub OIDC; no npm token is required.
 
 The workflow refuses to publish if the root `badbox` version already exists.
-The first native release uses version `0.1.0` consistently across all six npm
-packages and both Rust manifests.
+The `0.2.0` release uses the same version across all six npm packages and both
+Rust manifests.
 
 ## Development checks
 
