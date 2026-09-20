@@ -419,4 +419,65 @@ test rust/excessive-clones "reports excessive clones" {
     expect(result.performance?.outputBuildMs).toBeGreaterThanOrEqual(0);
     expect(result.performance?.resultMergeMs).toBeGreaterThanOrEqual(0);
   });
+
+  test("executes capture text, match ancestry, and group evidence conditions", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "input.rs");
+    const rules = join(root, "relational.badbox");
+    await Bun.write(source, `
+fn flagged() { loop { unwrap(value); break; } }
+fn wrong_method() { loop { inspect(value); break; } }
+fn outside_loop() { unwrap(value); }
+fn guarded() { loop { expect(value); break; } cancel(); }
+fn has_evidence() { write(value); transaction(); }
+fn lacks_evidence() { write(value); }
+`);
+    await Bun.write(rules, `#badbox 1
+rule rust/loop-without-cancel for rust {
+  summary "Selected calls inside loops without cancellation evidence"
+  find code(method, value) \`method(value)\`
+  group by nearest callable
+  where text(method) in ["unwrap", "expect"]
+  where text(method) != "inspect"
+  where text(method) not in ["inspect", "debug"]
+  where text(method) matches "^(unwrap|expect)$"
+  where match inside any { node loop_expression }
+  where group lacks any { code() \`cancel()\` }
+  when count > 0
+  report {
+    severity warning
+    message "Loop call has no recognized cancellation evidence"
+    evidence "selected loop calls"
+  }
+}
+
+rule rust/write-with-transaction for rust {
+  summary "Writes in functions with transaction evidence"
+  find code(method, value) \`method(value)\`
+  group by nearest callable
+  where text(method) == "write"
+  where group has all {
+    code() \`transaction()\`
+    node function_item
+  }
+  when count > 0
+  report {
+    severity info
+    message "Write has recognized transaction evidence"
+    evidence "write calls"
+  }
+}
+`);
+
+    const result = await inspect({ paths: [source], rulePaths: [rules], profile: true });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.performance?.selectorExecutions).toBe(6);
+    const actual = await Promise.all(records(result).map(async (finding) => [
+      finding.rule.id, await ownerText(finding), finding.observed,
+    ]));
+    expect(actual).toEqual([
+      ["rust/loop-without-cancel", "fn flagged() { loop { unwrap(value); break; } }", 1],
+      ["rust/write-with-transaction", "fn has_evidence() { write(value); transaction(); }", 1],
+    ]);
+  });
 });

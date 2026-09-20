@@ -769,7 +769,7 @@ fn scan_file(
             aggregation,
             output_build,
         },
-        selector_executions: plan.len(),
+        selector_executions: selection.selector_executions,
         rule_evaluations,
         parse_cache: if cache_hit {
             CacheCounts { hits: 1, misses: 0 }

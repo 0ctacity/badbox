@@ -13,6 +13,7 @@ pub struct Rule {
     pub parameters: BTreeMap<String, ParameterValue>,
     pub threshold_parameter: Option<String>,
     pub selection: StructuralSelection,
+    pub conditions: Vec<Condition>,
     pub scope: Scope,
     pub aggregation: Aggregation,
     pub threshold: Threshold,
@@ -26,10 +27,47 @@ pub enum ParameterValue {
     String(String),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StructuralSelection {
     Pattern(String),
     Kind(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Condition {
+    Text {
+        capture: String,
+        operator: TextOperator,
+        values: Vec<String>,
+    },
+    Relation {
+        target: RelationTarget,
+        relation: Relation,
+        require_all: bool,
+        selections: Vec<StructuralSelection>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TextOperator {
+    Equal,
+    NotEqual,
+    In,
+    NotIn,
+    Matches,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RelationTarget {
+    Match,
+    Group,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Relation {
+    Has,
+    Lacks,
+    Inside,
 }
 
 #[derive(Debug)]

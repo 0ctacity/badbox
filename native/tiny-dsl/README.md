@@ -174,7 +174,7 @@ the Badbox process fail. Version 1 messages are plain strings and do not interpo
 
 ## Relational conditions
 
-The syntax model preserves capture predicates and structural evidence clauses:
+Badbox executes capture predicates and a bounded set of structural evidence clauses:
 
 ```text
 where text(method) in ["unwrap", "expect"]
@@ -185,12 +185,23 @@ where group lacks any {
 }
 ```
 
-Text operators are `==`, `!=`, `in`, `not in`, and `matches`. Relational targets are `match` and
-`group`; relations are `has`, `lacks`, `inside`, `follows`, and `precedes`; the quantifier is `any`
-or `all`. Repeated `where` clauses mean all clauses must hold.
+Text operators are `==`, `!=`, `in`, `not in`, and `matches`. The capture must be declared by the
+rule's `find code(...)` selector. `matches` uses Rust regular-expression syntax.
 
-The parser represents these clauses, but the current Badbox evaluator does not execute them yet.
-The integration returns an explicit error for such a rule instead of ignoring its conditions.
+The evaluator currently supports these structural combinations:
+
+- `where match inside any|all { ... }` requires the selected match to be inside the auxiliary
+  selector or selectors.
+- `where group has any|all { ... }` requires the owning group to contain matching evidence.
+- `where group lacks any|all { ... }` requires the owning group not to satisfy the corresponding
+  `has` condition.
+
+Repeated `where` clauses mean all clauses must hold. Badbox collects the primary and auxiliary
+structural matches in one syntax-tree traversal per file, then evaluates the relations from their
+ranges. It does not rescan an owner for every primary match.
+
+The parser also recognizes `follows` and `precedes`, but the evaluator rejects them explicitly.
+Other target/relation combinations are likewise rejected rather than silently ignored.
 
 ## Tests and fixtures
 
@@ -231,9 +242,10 @@ buffer.
 ## Current boundaries
 
 - The crate parses rules and fixtures; it does not read files or execute tests.
-- Badbox executes the current `find -> group -> count -> threshold -> report` subset.
-- Relational `where` clauses are represented but rejected by the scanner until native evaluation is
-  implemented.
+- Badbox executes `find -> where -> group -> count -> threshold -> report`, including text
+  predicates, `match inside`, and `group has/lacks`.
+- `follows`, `precedes`, and unsupported target/relation combinations are parsed but rejected by the
+  scanner.
 - `callable` has semantic mappings for Rust, Go, PowerShell, and Zig. Other languages use explicit
   `node(...)` ownership for now.
 - PowerShell code patterns support single-node declared captures; multiple captures are rejected.

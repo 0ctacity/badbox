@@ -87,6 +87,7 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml_ng",

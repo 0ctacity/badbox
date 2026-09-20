@@ -101,6 +101,7 @@ pub fn compile(source: &str) -> Result<Rule> {
             YamlSelector::Pattern(selector) => StructuralSelection::Pattern(selector.pattern),
             YamlSelector::Kind(selector) => StructuralSelection::Kind(selector.kind),
         },
+        conditions: Vec::new(),
         scope: Scope::NearestAncestor(yaml.owner.nearest),
         aggregation: match yaml.aggregate {
             YamlAggregation::Count => Aggregation::Count,

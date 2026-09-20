@@ -15,6 +15,7 @@ pub struct SelectionTimings {
 pub struct Selection {
     pub matches: Vec<Vec<crate::model::OwnedMatch>>,
     pub timings: SelectionTimings,
+    pub selector_executions: usize,
 }
 
 pub trait StructuralBackend {

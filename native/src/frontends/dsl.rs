@@ -2,10 +2,13 @@
 
 use crate::{
     model::{Language, Severity},
-    rule_ir::{Aggregation, Evidence, ParameterValue, Rule, Scope, StructuralSelection, Threshold},
+    rule_ir::{
+        Aggregation, Condition, Evidence, ParameterValue, Relation, RelationTarget, Rule, Scope,
+        StructuralSelection, TextOperator, Threshold,
+    },
 };
 use anyhow::{Result, anyhow, bail, ensure};
-use tiny_dsl::{ComparisonValue, Group, Selection};
+use tiny_dsl::{ComparisonValue, Group, Selection, WhereClause};
 
 pub fn compile(source: &str) -> Result<Vec<Rule>> {
     let document = tiny_dsl::parse(source)?;
@@ -13,12 +16,8 @@ pub fn compile(source: &str) -> Result<Vec<Rule>> {
 }
 
 fn lower_rule(rule: tiny_dsl::Rule) -> Result<Rule> {
-    ensure!(
-        rule.where_clauses.is_empty(),
-        "rule {} uses where clauses, which the Badbox evaluator does not execute yet",
-        rule.id
-    );
     let language = language(&rule.language)?;
+    let conditions = lower_conditions(&rule.selection, &rule.where_clauses, language, &rule.id)?;
     let parameters = rule
         .parameters
         .iter()
@@ -46,12 +45,7 @@ fn lower_rule(rule: tiny_dsl::Rule) -> Result<Rule> {
             .ok_or_else(|| anyhow!("rule {} has invalid count parameter {name}", rule.id))?,
         _ => bail!("rule {} count threshold must be an integer", rule.id),
     };
-    let selection = match rule.selection {
-        Selection::Node(kind) => StructuralSelection::Kind(kind),
-        Selection::Code { captures, template } => {
-            StructuralSelection::Pattern(lower_captures(&template, &captures, language)?)
-        }
-    };
+    let selection = lower_selection(&rule.selection, language)?;
     let owners = match rule.group {
         Group::Callable => callable_kinds(language)
             .ok_or_else(|| {
@@ -79,6 +73,7 @@ fn lower_rule(rule: tiny_dsl::Rule) -> Result<Rule> {
         parameters,
         threshold_parameter,
         selection,
+        conditions,
         scope: Scope::NearestAncestor(owners),
         aggregation: Aggregation::Count,
         threshold: Threshold::GreaterThan(threshold),
@@ -86,6 +81,97 @@ fn lower_rule(rule: tiny_dsl::Rule) -> Result<Rule> {
             subject: rule.report.evidence,
         },
     })
+}
+
+fn lower_selection(selection: &Selection, language: Language) -> Result<StructuralSelection> {
+    Ok(match selection {
+        Selection::Node(kind) => StructuralSelection::Kind(kind.clone()),
+        Selection::Code { captures, template } => {
+            StructuralSelection::Pattern(lower_captures(template, captures, language)?)
+        }
+    })
+}
+
+fn lower_conditions(
+    selection: &Selection,
+    clauses: &[WhereClause],
+    language: Language,
+    rule_id: &str,
+) -> Result<Vec<Condition>> {
+    let captures = match selection {
+        Selection::Code { captures, .. } => captures
+            .iter()
+            .map(|capture| (capture.name.as_str(), capture.multiple))
+            .collect::<std::collections::HashMap<_, _>>(),
+        Selection::Node(_) => std::collections::HashMap::new(),
+    };
+    clauses
+        .iter()
+        .map(|clause| match clause {
+            WhereClause::Text {
+                capture,
+                operator,
+                values,
+            } => {
+                let multiple = captures.get(capture.as_str()).ok_or_else(|| {
+                    anyhow!("rule {rule_id} filters undeclared capture {capture}")
+                })?;
+                ensure!(
+                    !multiple,
+                    "rule {rule_id} cannot apply text conditions to multiple capture {capture}"
+                );
+                Ok(Condition::Text {
+                    capture: capture.to_ascii_uppercase(),
+                    operator: match operator {
+                        tiny_dsl::TextOperator::Equal => TextOperator::Equal,
+                        tiny_dsl::TextOperator::NotEqual => TextOperator::NotEqual,
+                        tiny_dsl::TextOperator::In => TextOperator::In,
+                        tiny_dsl::TextOperator::NotIn => TextOperator::NotIn,
+                        tiny_dsl::TextOperator::Matches => TextOperator::Matches,
+                    },
+                    values: values.clone(),
+                })
+            }
+            WhereClause::Relation {
+                target,
+                relation,
+                require_all,
+                selections,
+            } => {
+                let target = match target {
+                    tiny_dsl::RelationTarget::Match => RelationTarget::Match,
+                    tiny_dsl::RelationTarget::Group => RelationTarget::Group,
+                };
+                let relation = match relation {
+                    tiny_dsl::Relation::Has => Relation::Has,
+                    tiny_dsl::Relation::Lacks => Relation::Lacks,
+                    tiny_dsl::Relation::Inside => Relation::Inside,
+                    tiny_dsl::Relation::Follows | tiny_dsl::Relation::Precedes => {
+                        bail!(
+                            "rule {rule_id} uses a relational condition that does not execute yet"
+                        )
+                    }
+                };
+                ensure!(
+                    matches!(
+                        (target, relation),
+                        (RelationTarget::Match, Relation::Inside)
+                            | (RelationTarget::Group, Relation::Has | Relation::Lacks)
+                    ),
+                    "rule {rule_id} uses a relational condition that does not execute yet"
+                );
+                Ok(Condition::Relation {
+                    target,
+                    relation,
+                    require_all: *require_all,
+                    selections: selections
+                        .iter()
+                        .map(|selection| lower_selection(selection, language))
+                        .collect::<Result<_>>()?,
+                })
+            }
+        })
+        .collect()
 }
 
 fn lower_captures(
@@ -232,14 +318,14 @@ mod tests {
     }
 
     #[test]
-    fn relational_clauses_are_rejected_until_the_evaluator_supports_them() {
+    fn unsupported_relational_clauses_are_rejected_explicitly() {
         let error = compile(
             r#"#badbox 1
 rule rust/guarded for rust {
   summary "guarded"
   find code(value) `value.clone()`
   group by nearest callable
-  where group lacks any { node return_expression }
+  where match follows any { node return_expression }
   when count > 0
   report {
     severity info
@@ -249,7 +335,7 @@ rule rust/guarded for rust {
 }
 "#,
         )
-        .expect_err("relational execution is not implemented");
+        .expect_err("follows execution is not implemented");
         assert!(error.to_string().contains("does not execute yet"));
     }
 }

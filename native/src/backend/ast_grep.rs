@@ -3,17 +3,18 @@
 use super::{Selection, SelectionTimings, StructuralBackend};
 use crate::{
     model::{ByteRange, Language, OwnedMatch, RawOwner},
-    rule_ir::{Rule, StructuralSelection},
+    rule_ir::{Condition, Relation, RelationTarget, Rule, StructuralSelection, TextOperator},
 };
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use ast_grep_core::{
     AstGrep, Matcher, Node, Pattern,
     language::Language as AstGrepLanguage,
-    matcher::{KindMatcher, MatcherExt, PatternBuilder, PatternError},
+    matcher::{KindMatcher, MatcherExt, NodeMatch, PatternBuilder, PatternError},
     meta_var::MetaVariable,
     tree_sitter::{LanguageExt, StrDoc, TSLanguage, TSRange},
 };
 use ast_grep_language::SupportLang;
+use regex::Regex;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -27,19 +28,52 @@ enum CompiledSelector {
     Kind(KindMatcher),
 }
 
+struct CompiledStructuralSelector {
+    matcher: CompiledSelector,
+    potential_kinds: Option<Vec<usize>>,
+}
+
+enum CompiledTextMatcher {
+    Equal(String),
+    NotEqual(String),
+    In(Vec<String>),
+    NotIn(Vec<String>),
+    Regex(Regex),
+}
+
+struct CompiledTextCondition {
+    capture: String,
+    matcher: CompiledTextMatcher,
+}
+
+struct CompiledRelationCondition {
+    target: RelationTarget,
+    relation: Relation,
+    require_all: bool,
+    selectors: Vec<CompiledStructuralSelector>,
+}
+
+#[derive(Clone, Copy)]
+struct AuxiliarySelectorIndex {
+    rule: usize,
+    relation: usize,
+    selector: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExecutionKey {
     language: Language,
-    selector_kind: u8,
-    selector: String,
+    selector: StructuralSelection,
+    conditions: Vec<Condition>,
     owners: Vec<String>,
 }
 
 pub struct CompiledRule {
     rule: Rule,
-    selector: CompiledSelector,
+    selector: CompiledStructuralSelector,
     owners: Vec<KindMatcher>,
-    potential_kinds: Option<Vec<usize>>,
+    text_conditions: Vec<CompiledTextCondition>,
+    relations: Vec<CompiledRelationCondition>,
     execution_key: ExecutionKey,
 }
 
@@ -323,6 +357,56 @@ fn backend_language(language: Language) -> BackendLanguage {
     BackendLanguage::BuiltIn(built_in)
 }
 
+fn compile_selector(
+    selection: &StructuralSelection,
+    source_language: Language,
+    language: BackendLanguage,
+) -> Result<CompiledStructuralSelector> {
+    let matcher = match selection {
+        StructuralSelection::Pattern(pattern) => {
+            ensure!(!pattern.trim().is_empty(), "pattern must not be empty");
+            if source_language == Language::PowerShell {
+                ensure!(
+                    !pattern.contains(POWERSHELL_CAPTURE_PREFIX),
+                    "PowerShell pattern uses Badbox's reserved capture marker"
+                );
+            }
+            CompiledSelector::Pattern(Box::new(Pattern::try_new(pattern, language)?))
+        }
+        StructuralSelection::Kind(kind) => {
+            CompiledSelector::Kind(KindMatcher::try_new(kind, language)?)
+        }
+    };
+    let potential_kinds = match &matcher {
+        CompiledSelector::Pattern(pattern) => pattern.potential_kinds(),
+        CompiledSelector::Kind(kind) => kind.potential_kinds(),
+    }
+    .map(|kinds| kinds.iter().collect());
+    Ok(CompiledStructuralSelector {
+        matcher,
+        potential_kinds,
+    })
+}
+
+fn compile_text_matcher(operator: TextOperator, values: &[String]) -> Result<CompiledTextMatcher> {
+    Ok(match operator {
+        TextOperator::Equal => {
+            ensure!(values.len() == 1, "text equality requires one value");
+            CompiledTextMatcher::Equal(values[0].clone())
+        }
+        TextOperator::NotEqual => {
+            ensure!(values.len() == 1, "text inequality requires one value");
+            CompiledTextMatcher::NotEqual(values[0].clone())
+        }
+        TextOperator::In => CompiledTextMatcher::In(values.to_vec()),
+        TextOperator::NotIn => CompiledTextMatcher::NotIn(values.to_vec()),
+        TextOperator::Matches => {
+            ensure!(values.len() == 1, "text regex requires one value");
+            CompiledTextMatcher::Regex(Regex::new(&values[0])?)
+        }
+    })
+}
+
 impl StructuralBackend for AstGrepBackend {
     type CompiledRule = CompiledRule;
     type ExecutionKey = ExecutionKey;
@@ -330,32 +414,37 @@ impl StructuralBackend for AstGrepBackend {
 
     fn compile(rule: Rule) -> Result<CompiledRule> {
         let language = backend_language(rule.language);
-        let (selector, selector_kind, selector_text) = match &rule.selection {
-            StructuralSelection::Pattern(pattern) => {
-                ensure!(!pattern.trim().is_empty(), "pattern must not be empty");
-                if rule.language == Language::PowerShell {
-                    ensure!(
-                        !pattern.contains(POWERSHELL_CAPTURE_PREFIX),
-                        "PowerShell pattern uses Badbox's reserved capture marker"
-                    );
-                }
-                (
-                    CompiledSelector::Pattern(Box::new(Pattern::try_new(pattern, language)?)),
-                    0,
-                    pattern.clone(),
-                )
+        let selector = compile_selector(&rule.selection, rule.language, language)?;
+        let mut text_conditions = Vec::new();
+        let mut relations = Vec::new();
+        for condition in &rule.conditions {
+            match condition {
+                Condition::Text {
+                    capture,
+                    operator,
+                    values,
+                } => text_conditions.push(CompiledTextCondition {
+                    capture: capture.clone(),
+                    matcher: compile_text_matcher(*operator, values).with_context(|| {
+                        format!("rule {} has an invalid text condition", rule.id)
+                    })?,
+                }),
+                Condition::Relation {
+                    target,
+                    relation,
+                    require_all,
+                    selections,
+                } => relations.push(CompiledRelationCondition {
+                    target: *target,
+                    relation: *relation,
+                    require_all: *require_all,
+                    selectors: selections
+                        .iter()
+                        .map(|selection| compile_selector(selection, rule.language, language))
+                        .collect::<Result<_>>()?,
+                }),
             }
-            StructuralSelection::Kind(kind) => (
-                CompiledSelector::Kind(KindMatcher::try_new(kind, language)?),
-                1,
-                kind.clone(),
-            ),
-        };
-        let potential_kinds = match &selector {
-            CompiledSelector::Pattern(pattern) => pattern.potential_kinds(),
-            CompiledSelector::Kind(kind) => kind.potential_kinds(),
         }
-        .map(|kinds| kinds.iter().collect());
         let owners = rule
             .scope
             .nearest_ancestor_kinds()
@@ -367,15 +456,16 @@ impl StructuralBackend for AstGrepBackend {
         owner_key.dedup();
         let execution_key = ExecutionKey {
             language: rule.language,
-            selector_kind,
-            selector: selector_text,
+            selector: rule.selection.clone(),
+            conditions: rule.conditions.clone(),
             owners: owner_key,
         };
         Ok(CompiledRule {
             rule,
             selector,
             owners,
-            potential_kinds,
+            text_conditions,
+            relations,
             execution_key,
         })
     }
@@ -404,7 +494,7 @@ impl StructuralBackend for AstGrepBackend {
         let mut by_kind: HashMap<usize, Vec<usize>> = HashMap::new();
         let mut any_kind = Vec::new();
         for (index, rule) in rules.iter().enumerate() {
-            if let Some(kinds) = &rule.potential_kinds {
+            if let Some(kinds) = &rule.selector.potential_kinds {
                 for kind in kinds {
                     by_kind.entry(*kind).or_default().push(index);
                 }
@@ -412,14 +502,48 @@ impl StructuralBackend for AstGrepBackend {
                 any_kind.push(index);
             }
         }
+        let mut relation_ranges = rules
+            .iter()
+            .map(|rule| {
+                rule.relations
+                    .iter()
+                    .map(|relation| vec![Vec::new(); relation.selectors.len()])
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let mut auxiliary_by_kind: HashMap<usize, Vec<AuxiliarySelectorIndex>> = HashMap::new();
+        let mut auxiliary_any_kind = Vec::new();
+        let mut selector_executions = rules.len();
+        for (rule_index, rule) in rules.iter().enumerate() {
+            for (relation_index, relation) in rule.relations.iter().enumerate() {
+                selector_executions += relation.selectors.len();
+                for (selector_index, selector) in relation.selectors.iter().enumerate() {
+                    let index = AuxiliarySelectorIndex {
+                        rule: rule_index,
+                        relation: relation_index,
+                        selector: selector_index,
+                    };
+                    if let Some(kinds) = &selector.potential_kinds {
+                        for kind in kinds {
+                            auxiliary_by_kind.entry(*kind).or_default().push(index);
+                        }
+                    } else {
+                        auxiliary_any_kind.push(index);
+                    }
+                }
+            }
+        }
         for candidate in file.0.root().dfs() {
             let kind = usize::from(candidate.kind_id());
             let candidates = by_kind.get(&kind).into_iter().flatten().chain(&any_kind);
             for &index in candidates {
                 let rule = rules[index];
-                let Some(matched) = match_candidate(rule, candidate.clone()) else {
+                let Some(matched) = match_candidate(&rule.selector, candidate.clone()) else {
                     continue;
                 };
+                if !text_conditions_match(rule, &matched) {
+                    continue;
+                }
                 let owner_started = profile.then(Instant::now);
                 let owner = matched
                     .ancestors()
@@ -440,6 +564,26 @@ impl StructuralBackend for AstGrepBackend {
                     ownership += owner_started.elapsed();
                 }
             }
+            let auxiliary = auxiliary_by_kind
+                .get(&kind)
+                .into_iter()
+                .flatten()
+                .chain(&auxiliary_any_kind);
+            for &index in auxiliary {
+                let selector =
+                    &rules[index.rule].relations[index.relation].selectors[index.selector];
+                let Some(matched) = match_candidate(selector, candidate.clone()) else {
+                    continue;
+                };
+                relation_ranges[index.rule][index.relation][index.selector]
+                    .push(byte_range(&matched));
+            }
+        }
+        for (index, rule) in rules.iter().enumerate() {
+            let mut group_cache = HashMap::new();
+            matches[index].retain(|matched| {
+                relations_match(rule, matched, &relation_ranges[index], &mut group_cache)
+            });
         }
         let total = if profile {
             started.elapsed()
@@ -448,6 +592,7 @@ impl StructuralBackend for AstGrepBackend {
         };
         Selection {
             matches,
+            selector_executions,
             timings: SelectionTimings {
                 matching: total.saturating_sub(ownership),
                 ownership,
@@ -457,14 +602,75 @@ impl StructuralBackend for AstGrepBackend {
 }
 
 fn match_candidate<'tree>(
-    rule: &CompiledRule,
+    selector: &CompiledStructuralSelector,
     candidate: Node<'tree, StrDoc<BackendLanguage>>,
-) -> Option<Node<'tree, StrDoc<BackendLanguage>>> {
-    let matched = match &rule.selector {
+) -> Option<NodeMatch<'tree, StrDoc<BackendLanguage>>> {
+    match &selector.matcher {
         CompiledSelector::Pattern(pattern) => pattern.match_node(candidate),
         CompiledSelector::Kind(kind) => kind.match_node(candidate),
-    }?;
-    Some(matched.into())
+    }
+}
+
+fn text_conditions_match(
+    rule: &CompiledRule,
+    matched: &NodeMatch<'_, StrDoc<BackendLanguage>>,
+) -> bool {
+    rule.text_conditions.iter().all(|condition| {
+        let Some(capture) = matched.get_env().get_match(&condition.capture) else {
+            return false;
+        };
+        let text = capture.text();
+        match &condition.matcher {
+            CompiledTextMatcher::Equal(value) => text == value.as_str(),
+            CompiledTextMatcher::NotEqual(value) => text != value.as_str(),
+            CompiledTextMatcher::In(values) => values.iter().any(|value| text == value.as_str()),
+            CompiledTextMatcher::NotIn(values) => values.iter().all(|value| text != value.as_str()),
+            CompiledTextMatcher::Regex(regex) => regex.is_match(&text),
+        }
+    })
+}
+
+fn relations_match(
+    rule: &CompiledRule,
+    matched: &OwnedMatch,
+    facts: &[Vec<Vec<ByteRange>>],
+    group_cache: &mut HashMap<(usize, usize, usize), bool>,
+) -> bool {
+    rule.relations
+        .iter()
+        .enumerate()
+        .all(|(index, relation)| match relation.target {
+            RelationTarget::Match => relation_matches(relation, matched.range, &facts[index]),
+            RelationTarget::Group => *group_cache
+                .entry((index, matched.owner.range.start, matched.owner.range.end))
+                .or_insert_with(|| relation_matches(relation, matched.owner.range, &facts[index])),
+        })
+}
+
+fn relation_matches(
+    relation: &CompiledRelationCondition,
+    target: ByteRange,
+    facts: &[Vec<ByteRange>],
+) -> bool {
+    let selection_matches = |ranges: &Vec<ByteRange>| {
+        ranges.iter().any(|range| match relation.target {
+            RelationTarget::Match => contains(*range, target),
+            RelationTarget::Group => contains(target, *range),
+        })
+    };
+    let matched = if relation.require_all {
+        facts.iter().all(selection_matches)
+    } else {
+        facts.iter().any(selection_matches)
+    };
+    match relation.relation {
+        Relation::Has | Relation::Inside => matched,
+        Relation::Lacks => !matched,
+    }
+}
+
+fn contains(outer: ByteRange, inner: ByteRange) -> bool {
+    outer.start <= inner.start && inner.end <= outer.end
 }
 
 fn byte_range(node: &Node<'_, StrDoc<BackendLanguage>>) -> ByteRange {
@@ -586,6 +792,7 @@ function Example {
             selection: StructuralSelection::Pattern(
                 "Write-Output $__BADBOX_CAPTURE_VALUE".to_owned(),
             ),
+            conditions: Vec::new(),
             scope: Scope::NearestAncestor(vec!["function_statement".to_owned()]),
             aggregation: Aggregation::Count,
             threshold: Threshold::GreaterThan(0),
