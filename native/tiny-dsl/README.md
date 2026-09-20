@@ -120,6 +120,10 @@ Names declared inside `code(...)` are captures. The declaration is what makes a 
 undeclared identifiers in the backtick pattern remain literal. `name...` declares a multiple-node
 capture. Badbox lowers declared names to the backend's capture notation before compilation.
 
+Capture names are rule-scoped for ordering relations. Repeating a single-node capture name in the
+primary selector and a `follows` or `precedes` selector requires both occurrences to capture exactly
+the same source text. Different names remain independent.
+
 Use an explicit syntax-node kind when the grammar already has a precise node:
 
 ```text
@@ -183,6 +187,11 @@ where group lacks any {
   code(ctx) `ctx.cancel()`
   node select_expression
 }
+
+find code(statement) `statement.clearBindings()`
+where match follows any {
+  code(statement) `statement.reset()`
+}
 ```
 
 Text operators are `==`, `!=`, `in`, `not in`, and `matches`. The capture must be declared by the
@@ -210,7 +219,11 @@ resolve to statements in the same lexical block and to the same nearest callable
 sibling statements are allowed. Nested callables and different branch, loop, switch, or
 error-handling blocks do not satisfy the relation. `any` means at least one listed selector has a
 qualifying occurrence; `all` means every listed selector does. Immediate-sibling ordering is not
-implemented. Other target/relation combinations are rejected rather than silently ignored.
+implemented. When a capture name occurs in both the primary and an ordering selector, exact captured
+source-text equality is an additional requirement. Multiple shared names must all match;
+multiple-node captures cannot be correlated. Capture values are interned only for the current file
+and are discarded after evaluation. Other target/relation combinations are rejected rather than
+silently ignored.
 
 ## Tests and fixtures
 

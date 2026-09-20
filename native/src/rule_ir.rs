@@ -45,6 +45,7 @@ pub enum Condition {
         relation: Relation,
         require_all: bool,
         selections: Vec<StructuralSelection>,
+        shared_captures: Vec<Vec<String>>,
     },
 }
 

@@ -114,8 +114,9 @@ The DSL currently supports:
 - strictly greater-than count thresholds and scalar parameter overrides.
 
 Ordering is statement-level within the same nearest callable and lexical block; intervening
-siblings are allowed. Immediate ordering and unsupported target/relation combinations are rejected
-explicitly. Never silently ignore a parsed rule condition.
+siblings are allowed. Repeating a single-node capture name in the primary and an ordering selector
+requires exact captured source-text equality. Immediate ordering and unsupported target/relation
+combinations are rejected explicitly. Never silently ignore a parsed rule condition.
 
 Badbox ships the 28 ast-grep builtin parsers plus statically linked PowerShell and Zig parsers.
 Extension detection selects relevant language rules; it is not framework, dependency, or semantic

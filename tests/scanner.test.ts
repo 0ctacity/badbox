@@ -625,6 +625,76 @@ rule ${probe.language}/ordering for ${probe.language} {
     }
   });
 
+  test("correlates repeated capture names across primary and ordering selectors", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "capture-ordering.zig");
+    const rules = join(root, "capture-ordering.badbox");
+    await Bun.write(source, `
+fn sameReceiver() void { stmt.reset(); stmt.clearBindings(); }
+fn differentReceivers() void { first.reset(); second.clearBindings(); }
+fn anotherSameReceiver() void { other.reset(); other.clearBindings(); }
+`);
+    await Bun.write(rules, `#badbox 1
+rule zig/correlated-ordering for zig {
+  summary "A statement is reset before its bindings are cleared"
+  find code(statement) \`statement.clearBindings()\`
+  group by nearest callable
+  where match follows any {
+    code(statement) \`statement.reset()\`
+  }
+  when count > 0
+  report {
+    severity info
+    message "Statement reset is followed by clearing its bindings"
+    evidence "same-receiver reset and clear sites"
+  }
+}
+`);
+
+    const result = await inspect({ paths: [source], rulePaths: [rules] });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.recordWidth).toBe(5);
+    const owners = await Promise.all(records(result).map(ownerText));
+    expect(owners).toEqual([
+      "fn sameReceiver() void { stmt.reset(); stmt.clearBindings(); }",
+      "fn anotherSameReceiver() void { other.reset(); other.clearBindings(); }",
+    ]);
+  });
+
+  test("requires every shared capture in an ordering selector to match", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "multi-capture-ordering.zig");
+    const rules = join(root, "multi-capture-ordering.badbox");
+    await Bun.write(source, `
+fn bothMatch() void { db.prepare(sql); db.execute(sql); }
+fn databaseDiffers() void { first.prepare(sql); second.execute(sql); }
+fn statementDiffers() void { db.prepare(first_sql); db.execute(second_sql); }
+`);
+    await Bun.write(rules, `#badbox 1
+rule zig/multi-capture-ordering for zig {
+  summary "A database executes the statement it prepared"
+  find code(database, statement) \`database.execute(statement)\`
+  group by nearest callable
+  where match follows any {
+    code(database, statement) \`database.prepare(statement)\`
+  }
+  when count > 0
+  report {
+    severity info
+    message "Database execution follows matching preparation"
+    evidence "same-database and same-statement sites"
+  }
+}
+`);
+
+    const result = await inspect({ paths: [source], rulePaths: [rules] });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.findingCount).toBe(1);
+    expect(await ownerText(records(result)[0]!)).toBe(
+      "fn bothMatch() void { db.prepare(sql); db.execute(sql); }",
+    );
+  });
+
   test("interns exact selectors across distinct rule plans", async () => {
     const root = await temporaryRoot();
     const source = join(root, "input.rs");

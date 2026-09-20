@@ -53,6 +53,7 @@ struct CompiledRelationCondition {
     relation: Relation,
     require_all: bool,
     selectors: Vec<Arc<CompiledStructuralSelector>>,
+    shared_captures: Vec<Vec<String>>,
 }
 
 pub struct FinderPlan {
@@ -61,6 +62,7 @@ pub struct FinderPlan {
     relation_selectors: Vec<Vec<Vec<usize>>>,
     ordering_uses: Vec<Vec<OrderingUse>>,
     rules_need_sequence: Vec<bool>,
+    rules_need_correlation: Vec<bool>,
     needs_ranges: Vec<bool>,
     by_kind: HashMap<usize, Vec<usize>>,
     any_kind: Vec<usize>,
@@ -83,11 +85,19 @@ struct SequenceContext {
 struct OrderingFact {
     owner: ByteRange,
     sequence: SequenceContext,
+    correlation_id: Option<u32>,
 }
 
 struct CandidateMatch {
     matched: OwnedMatch,
     sequence: Option<SequenceContext>,
+    correlation_ids: Vec<Option<u32>>,
+}
+
+#[derive(Default)]
+struct CaptureInterner {
+    values: HashMap<String, u32>,
+    tuples: HashMap<Vec<u32>, u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -104,6 +114,7 @@ pub struct CompiledRule {
     owners: Vec<KindMatcher>,
     text_conditions: Vec<CompiledTextCondition>,
     relations: Vec<CompiledRelationCondition>,
+    relation_capture_offsets: Vec<usize>,
     execution_key: ExecutionKey,
 }
 
@@ -486,7 +497,13 @@ impl StructuralBackend for AstGrepBackend {
                     relation,
                     require_all,
                     selections,
+                    shared_captures,
                 } => {
+                    ensure!(
+                        shared_captures.len() == selections.len(),
+                        "rule {} has inconsistent relational capture metadata",
+                        rule.id
+                    );
                     if matches!(relation, Relation::Follows | Relation::Precedes) {
                         ensure!(
                             sequence_container_kinds(rule.language).is_some(),
@@ -503,6 +520,7 @@ impl StructuralBackend for AstGrepBackend {
                             .iter()
                             .map(|selection| compile_selector(selection, rule.language, language))
                             .collect::<Result<_>>()?,
+                        shared_captures: shared_captures.clone(),
                     });
                 }
             }
@@ -522,12 +540,22 @@ impl StructuralBackend for AstGrepBackend {
             conditions: rule.conditions.clone(),
             owners: owner_key,
         };
+        let mut capture_offset = 0;
+        let relation_capture_offsets = relations
+            .iter()
+            .map(|relation| {
+                let offset = capture_offset;
+                capture_offset += relation.shared_captures.len();
+                offset
+            })
+            .collect();
         Ok(CompiledRule {
             rule,
             selector,
             owners,
             text_conditions,
             relations,
+            relation_capture_offsets,
             execution_key,
         })
     }
@@ -548,6 +576,7 @@ impl StructuralBackend for AstGrepBackend {
         let mut ordering_uses = Vec::new();
         let mut relation_selectors = Vec::with_capacity(rules.len());
         let mut rules_need_sequence = vec![false; rules.len()];
+        let mut rules_need_correlation = vec![false; rules.len()];
         for (rule_index, rule) in rules.iter().enumerate() {
             let primary = intern_selector(
                 &rule.selector,
@@ -566,6 +595,10 @@ impl StructuralBackend for AstGrepBackend {
                         let ordering =
                             matches!(relation.relation, Relation::Follows | Relation::Precedes);
                         rules_need_sequence[rule_index] |= ordering;
+                        rules_need_correlation[rule_index] |= relation
+                            .shared_captures
+                            .iter()
+                            .any(|captures| !captures.is_empty());
                         relation
                             .selectors
                             .iter()
@@ -612,6 +645,7 @@ impl StructuralBackend for AstGrepBackend {
             relation_selectors,
             ordering_uses,
             rules_need_sequence,
+            rules_need_correlation,
             needs_ranges,
             by_kind,
             any_kind,
@@ -638,6 +672,7 @@ impl StructuralBackend for AstGrepBackend {
         let mut matches: Vec<Vec<CandidateMatch>> = (0..rules.len()).map(|_| Vec::new()).collect();
         debug_assert_eq!(rules.len(), plan.relation_selectors.len());
         let mut selector_ranges = vec![Vec::new(); plan.selectors.len()];
+        let mut capture_interner = CaptureInterner::default();
         let mut ordering_facts = rules
             .iter()
             .map(|rule| {
@@ -669,6 +704,12 @@ impl StructuralBackend for AstGrepBackend {
                     .flatten();
                 for ordering_use in &plan.ordering_uses[selector_id] {
                     let rule = rules[ordering_use.rule_index];
+                    let shared_captures = &rule.relations[ordering_use.relation_index]
+                        .shared_captures[ordering_use.selection_index];
+                    let correlation_id = capture_interner.intern(&matched, shared_captures);
+                    if !shared_captures.is_empty() && correlation_id.is_none() {
+                        continue;
+                    }
                     let owner = matched
                         .ancestors()
                         .find(|ancestor| rule.owners.iter().any(|kind| ancestor.matches(kind)));
@@ -679,6 +720,7 @@ impl StructuralBackend for AstGrepBackend {
                             .push(OrderingFact {
                                 owner: byte_range(&owner),
                                 sequence,
+                                correlation_id,
                             });
                     }
                 }
@@ -710,6 +752,11 @@ impl StructuralBackend for AstGrepBackend {
                         sequence: plan.rules_need_sequence[rule_index]
                             .then(|| sequence_context(matched.get_node(), rule.rule.language))
                             .flatten(),
+                        correlation_ids: if plan.rules_need_correlation[rule_index] {
+                            primary_correlation_ids(rule, &matched, &mut capture_interner)
+                        } else {
+                            Vec::new()
+                        },
                     });
                     if let Some(owner_started) = owner_started {
                         ownership += owner_started.elapsed();
@@ -784,6 +831,55 @@ fn text_conditions_match(
     })
 }
 
+impl CaptureInterner {
+    fn intern(
+        &mut self,
+        matched: &NodeMatch<'_, StrDoc<BackendLanguage>>,
+        captures: &[String],
+    ) -> Option<u32> {
+        if captures.is_empty() {
+            return None;
+        }
+        let mut tuple = Vec::with_capacity(captures.len());
+        for capture in captures {
+            let text = matched.get_env().get_match(capture)?.text();
+            let value_id = if let Some(value_id) = self.values.get(text.as_ref()) {
+                *value_id
+            } else {
+                let value_id = u32::try_from(self.values.len()).ok()?;
+                self.values.insert(text.into_owned(), value_id);
+                value_id
+            };
+            tuple.push(value_id);
+        }
+        if let Some(tuple_id) = self.tuples.get(&tuple) {
+            return Some(*tuple_id);
+        }
+        let tuple_id = u32::try_from(self.tuples.len()).ok()?;
+        self.tuples.insert(tuple, tuple_id);
+        Some(tuple_id)
+    }
+}
+
+fn primary_correlation_ids(
+    rule: &CompiledRule,
+    matched: &NodeMatch<'_, StrDoc<BackendLanguage>>,
+    interner: &mut CaptureInterner,
+) -> Vec<Option<u32>> {
+    let count = rule
+        .relations
+        .iter()
+        .map(|relation| relation.shared_captures.len())
+        .sum();
+    let mut ids = Vec::with_capacity(count);
+    for relation in &rule.relations {
+        for captures in &relation.shared_captures {
+            ids.push(interner.intern(matched, captures));
+        }
+    }
+    ids
+}
+
 fn relations_match(
     rule: &CompiledRule,
     candidate: &CandidateMatch,
@@ -796,9 +892,12 @@ fn relations_match(
         .iter()
         .enumerate()
         .all(|(index, relation)| match relation.relation {
-            Relation::Follows | Relation::Precedes => {
-                ordering_relation_matches(relation, candidate, &ordering_facts[index])
-            }
+            Relation::Follows | Relation::Precedes => ordering_relation_matches(
+                relation,
+                candidate,
+                &ordering_facts[index],
+                rule.relation_capture_offsets[index],
+            ),
             _ => match relation.target {
                 RelationTarget::Match => relation_matches(
                     relation,
@@ -828,14 +927,24 @@ fn ordering_relation_matches(
     relation: &CompiledRelationCondition,
     candidate: &CandidateMatch,
     selections: &[Vec<OrderingFact>],
+    correlation_offset: usize,
 ) -> bool {
     let Some(primary) = candidate.sequence else {
         return false;
     };
-    let selection_matches = |facts: &Vec<OrderingFact>| {
+    let selection_matches = |(selection_index, facts): (usize, &Vec<OrderingFact>)| {
         facts.iter().any(|fact| {
+            let shared_captures = &relation.shared_captures[selection_index];
+            let captures_match = shared_captures.is_empty()
+                || candidate
+                    .correlation_ids
+                    .get(correlation_offset + selection_index)
+                    .copied()
+                    .flatten()
+                    .is_some_and(|primary| fact.correlation_id == Some(primary));
             same_range(fact.owner, candidate.matched.owner.range)
                 && same_range(fact.sequence.block, primary.block)
+                && captures_match
                 && match relation.relation {
                     Relation::Follows => fact.sequence.statement.end <= primary.statement.start,
                     Relation::Precedes => fact.sequence.statement.start >= primary.statement.end,
@@ -844,9 +953,9 @@ fn ordering_relation_matches(
         })
     };
     if relation.require_all {
-        selections.iter().all(selection_matches)
+        selections.iter().enumerate().all(selection_matches)
     } else {
-        selections.iter().any(selection_matches)
+        selections.iter().enumerate().any(selection_matches)
     }
 }
 

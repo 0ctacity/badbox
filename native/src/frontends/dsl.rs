@@ -113,6 +113,10 @@ fn lower_conditions(
     language: Language,
     rule_id: &str,
 ) -> Result<Vec<Condition>> {
+    let primary_captures = match selection {
+        Selection::Code { captures, .. } => captures.as_slice(),
+        Selection::Node(_) => &[],
+    };
     let captures = match selection {
         Selection::Code { captures, .. } => captures
             .iter()
@@ -176,6 +180,15 @@ fn lower_conditions(
                     ),
                     "rule {rule_id} uses a relational condition that does not execute yet"
                 );
+                let shared_captures = if matches!(relation, Relation::Follows | Relation::Precedes)
+                {
+                    selections
+                        .iter()
+                        .map(|selection| shared_capture_names(primary_captures, selection, rule_id))
+                        .collect::<Result<Vec<_>>>()?
+                } else {
+                    vec![Vec::new(); selections.len()]
+                };
                 Ok(Condition::Relation {
                     target,
                     relation,
@@ -184,8 +197,40 @@ fn lower_conditions(
                         .iter()
                         .map(|selection| lower_selection(selection, language))
                         .collect::<Result<_>>()?,
+                    shared_captures,
                 })
             }
+        })
+        .collect()
+}
+
+fn shared_capture_names(
+    primary: &[tiny_dsl::Capture],
+    auxiliary: &Selection,
+    rule_id: &str,
+) -> Result<Vec<String>> {
+    let Selection::Code {
+        captures: auxiliary,
+        ..
+    } = auxiliary
+    else {
+        return Ok(Vec::new());
+    };
+    primary
+        .iter()
+        .filter_map(|primary| {
+            auxiliary
+                .iter()
+                .find(|auxiliary| auxiliary.name == primary.name)
+                .map(|auxiliary| (primary, auxiliary))
+        })
+        .map(|(primary, auxiliary)| {
+            ensure!(
+                !primary.multiple && !auxiliary.multiple,
+                "rule {rule_id} cannot correlate multiple capture {}",
+                primary.name
+            );
+            Ok(primary.name.to_ascii_uppercase())
         })
         .collect()
 }
@@ -383,5 +428,33 @@ rule rust/guarded for rust {
         )
         .expect_err("ordering requires a callable boundary");
         assert!(error.to_string().contains("grouping by nearest callable"));
+    }
+
+    #[test]
+    fn repeated_ordering_capture_names_lower_as_equality_joins() {
+        let rules = compile(
+            r#"#badbox 1
+rule zig/correlated for zig {
+  summary "correlated"
+  find code(statement) `statement.clearBindings()`
+  group by nearest callable
+  where match follows any { code(statement) `statement.reset()` }
+  when count > 0
+  report {
+    severity info
+    message "same statement"
+    evidence "statement sites"
+  }
+}
+"#,
+        )
+        .expect("shared captures lower into rule IR");
+        assert!(matches!(
+            rules[0].conditions.as_slice(),
+            [Condition::Relation {
+                shared_captures,
+                ..
+            }] if shared_captures == &[vec!["STATEMENT".to_owned()]]
+        ));
     }
 }
