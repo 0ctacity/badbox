@@ -198,7 +198,8 @@ The evaluator currently supports these structural combinations:
 
 Repeated `where` clauses mean all clauses must hold. Badbox collects the primary and auxiliary
 structural matches in one syntax-tree traversal per file, then evaluates the relations from their
-ranges. It does not rescan an owner for every primary match.
+ranges. Identical selectors are collected once and shared by every rule that references them; it
+does not rescan an owner for every primary match.
 
 The parser also recognizes `follows` and `precedes`, but the evaluator rejects them explicitly.
 Other target/relation combinations are likewise rejected rather than silently ignored.

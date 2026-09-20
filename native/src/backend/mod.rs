@@ -21,15 +21,18 @@ pub struct Selection {
 pub trait StructuralBackend {
     type CompiledRule;
     type ExecutionKey: Clone + Ord;
+    type FinderPlan;
     type ParsedFile;
 
     fn compile(rule: Rule) -> Result<Self::CompiledRule>;
     fn rule(compiled: &Self::CompiledRule) -> &Rule;
     fn execution_key(compiled: &Self::CompiledRule) -> &Self::ExecutionKey;
+    fn plan(rules: &[&Self::CompiledRule]) -> Self::FinderPlan;
     fn parse(source: &str, language: Language) -> Result<Self::ParsedFile>;
     fn select_many(
         file: &Self::ParsedFile,
         rules: &[&Self::CompiledRule],
+        plan: &Self::FinderPlan,
         profile: bool,
     ) -> Selection;
 }

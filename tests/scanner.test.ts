@@ -460,6 +460,7 @@ rule rust/write-with-transaction for rust {
     code() \`transaction()\`
     node function_item
   }
+  where group lacks any { code() \`cancel()\` }
   when count > 0
   report {
     severity info
@@ -471,7 +472,8 @@ rule rust/write-with-transaction for rust {
 
     const result = await inspect({ paths: [source], rulePaths: [rules], profile: true });
     expect(result.diagnostics).toEqual([]);
-    expect(result.performance?.selectorExecutions).toBe(6);
+    expect(result.performance?.selectorExecutions).toBe(5);
+    expect(result.performance?.ruleEvaluations).toBe(2);
     const actual = await Promise.all(records(result).map(async (finding) => [
       finding.rule.id, await ownerText(finding), finding.observed,
     ]));
@@ -479,5 +481,32 @@ rule rust/write-with-transaction for rust {
       ["rust/loop-without-cancel", "fn flagged() { loop { unwrap(value); break; } }", 1],
       ["rust/write-with-transaction", "fn has_evidence() { write(value); transaction(); }", 1],
     ]);
+  });
+
+  test("interns exact selectors across distinct rule plans", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "input.rs");
+    const rules = join(root, "shared-selectors.badbox");
+    await Bun.write(source, "fn example() { clone(value); }");
+    const definitions = Array.from({ length: 50 }, (_, index) => `
+rule rust/shared-${index} for rust {
+  summary "Shared selector probe ${index}"
+  find code(method, value) \`method(value)\`
+  group by nearest callable
+  where text(method) matches "^(clone|never_${index})$"
+  where group lacks any { code() \`cancel()\` }
+  when count > 0
+  report {
+    severity info
+    message "Shared selector matched"
+    evidence "call sites"
+  }
+}`).join("\n");
+    await Bun.write(rules, `#badbox 1\n${definitions}\n`);
+
+    const result = await inspect({ paths: [source], rulePaths: [rules], profile: true });
+    expect(result.findingCount).toBe(50);
+    expect(result.performance?.selectorExecutions).toBe(2);
+    expect(result.performance?.ruleEvaluations).toBe(50);
   });
 });

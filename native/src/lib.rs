@@ -38,6 +38,7 @@ type Fingerprint = [u8; 32];
 
 type CompiledRule = <AstGrepBackend as StructuralBackend>::CompiledRule;
 type ExecutionKey = <AstGrepBackend as StructuralBackend>::ExecutionKey;
+type FinderPlan = <AstGrepBackend as StructuralBackend>::FinderPlan;
 type ParsedFile = <AstGrepBackend as StructuralBackend>::ParsedFile;
 
 struct RuleCacheEntry {
@@ -245,6 +246,7 @@ struct ExecutionGroup {
 
 struct LanguagePlan {
     groups: Vec<ExecutionGroup>,
+    finder: FinderPlan,
     fingerprint: Fingerprint,
 }
 
@@ -515,13 +517,19 @@ fn execution_plans(rules: &[ResolvedRule]) -> ExecutionPlans {
     plans
         .into_iter()
         .map(|(language, groups)| {
+            let groups = groups
+                .into_values()
+                .map(|rules| ExecutionGroup { rules })
+                .collect::<Vec<_>>();
+            let representatives = groups
+                .iter()
+                .map(|group| group.rules[0].rule.as_ref())
+                .collect::<Vec<_>>();
             (
                 language,
                 LanguagePlan {
-                    groups: groups
-                        .into_values()
-                        .map(|rules| ExecutionGroup { rules })
-                        .collect(),
+                    finder: AstGrepBackend::plan(&representatives),
+                    groups,
                     fingerprint: *fingerprints
                         .remove(&language)
                         .expect("language plan has a fingerprint")
@@ -672,6 +680,7 @@ fn scan_file(
     file_id: u32,
     language: Language,
     plan: &[ExecutionGroup],
+    finder: &FinderPlan,
     settings: FileScanSettings,
 ) -> Result<FileScan> {
     let file_name = user_facing_path(file)?;
@@ -723,7 +732,8 @@ fn scan_file(
         .iter()
         .map(|group| group.rules[0].rule.as_ref())
         .collect::<Vec<_>>();
-    let selection = AstGrepBackend::select_many(&parsed, &representatives, settings.profile);
+    let selection =
+        AstGrepBackend::select_many(&parsed, &representatives, finder, settings.profile);
     let mut findings = Vec::new();
     let mut evaluation = Duration::ZERO;
     let mut aggregation = Duration::ZERO;
@@ -878,6 +888,7 @@ fn scan(options: ScanOptions) -> Result<ScanOutput> {
                             .expect("file count was checked against u32::MAX"),
                         language,
                         &language_plan.groups,
+                        &language_plan.finder,
                         FileScanSettings {
                             plan_fingerprint: language_plan.fingerprint,
                             max_findings: options.max_findings as usize,

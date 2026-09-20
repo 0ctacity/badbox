@@ -17,7 +17,8 @@ use ast_grep_language::SupportLang;
 use regex::Regex;
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -29,6 +30,7 @@ enum CompiledSelector {
 }
 
 struct CompiledStructuralSelector {
+    selection: StructuralSelection,
     matcher: CompiledSelector,
     potential_kinds: Option<Vec<usize>>,
 }
@@ -50,14 +52,16 @@ struct CompiledRelationCondition {
     target: RelationTarget,
     relation: Relation,
     require_all: bool,
-    selectors: Vec<CompiledStructuralSelector>,
+    selectors: Vec<Arc<CompiledStructuralSelector>>,
 }
 
-#[derive(Clone, Copy)]
-struct AuxiliarySelectorIndex {
-    rule: usize,
-    relation: usize,
-    selector: usize,
+pub struct FinderPlan {
+    selectors: Vec<Arc<CompiledStructuralSelector>>,
+    primary_uses: Vec<Vec<usize>>,
+    relation_selectors: Vec<Vec<Vec<usize>>>,
+    needs_ranges: Vec<bool>,
+    by_kind: HashMap<usize, Vec<usize>>,
+    any_kind: Vec<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -70,7 +74,7 @@ pub struct ExecutionKey {
 
 pub struct CompiledRule {
     rule: Rule,
-    selector: CompiledStructuralSelector,
+    selector: Arc<CompiledStructuralSelector>,
     owners: Vec<KindMatcher>,
     text_conditions: Vec<CompiledTextCondition>,
     relations: Vec<CompiledRelationCondition>,
@@ -361,7 +365,7 @@ fn compile_selector(
     selection: &StructuralSelection,
     source_language: Language,
     language: BackendLanguage,
-) -> Result<CompiledStructuralSelector> {
+) -> Result<Arc<CompiledStructuralSelector>> {
     let matcher = match selection {
         StructuralSelection::Pattern(pattern) => {
             ensure!(!pattern.trim().is_empty(), "pattern must not be empty");
@@ -382,10 +386,11 @@ fn compile_selector(
         CompiledSelector::Kind(kind) => kind.potential_kinds(),
     }
     .map(|kinds| kinds.iter().collect());
-    Ok(CompiledStructuralSelector {
+    Ok(Arc::new(CompiledStructuralSelector {
+        selection: selection.clone(),
         matcher,
         potential_kinds,
-    })
+    }))
 }
 
 fn compile_text_matcher(operator: TextOperator, values: &[String]) -> Result<CompiledTextMatcher> {
@@ -407,9 +412,28 @@ fn compile_text_matcher(operator: TextOperator, values: &[String]) -> Result<Com
     })
 }
 
+fn intern_selector(
+    selector: &Arc<CompiledStructuralSelector>,
+    ids: &mut BTreeMap<StructuralSelection, usize>,
+    selectors: &mut Vec<Arc<CompiledStructuralSelector>>,
+    primary_uses: &mut Vec<Vec<usize>>,
+    needs_ranges: &mut Vec<bool>,
+) -> usize {
+    if let Some(id) = ids.get(&selector.selection) {
+        return *id;
+    }
+    let id = selectors.len();
+    ids.insert(selector.selection.clone(), id);
+    selectors.push(Arc::clone(selector));
+    primary_uses.push(Vec::new());
+    needs_ranges.push(false);
+    id
+}
+
 impl StructuralBackend for AstGrepBackend {
     type CompiledRule = CompiledRule;
     type ExecutionKey = ExecutionKey;
+    type FinderPlan = FinderPlan;
     type ParsedFile = ParsedFile;
 
     fn compile(rule: Rule) -> Result<CompiledRule> {
@@ -478,6 +502,65 @@ impl StructuralBackend for AstGrepBackend {
         &compiled.execution_key
     }
 
+    fn plan(rules: &[&CompiledRule]) -> FinderPlan {
+        let mut ids = BTreeMap::new();
+        let mut selectors = Vec::new();
+        let mut primary_uses = Vec::new();
+        let mut needs_ranges = Vec::new();
+        let mut relation_selectors = Vec::with_capacity(rules.len());
+        for (rule_index, rule) in rules.iter().enumerate() {
+            let primary = intern_selector(
+                &rule.selector,
+                &mut ids,
+                &mut selectors,
+                &mut primary_uses,
+                &mut needs_ranges,
+            );
+            primary_uses[primary].push(rule_index);
+            relation_selectors.push(
+                rule.relations
+                    .iter()
+                    .map(|relation| {
+                        relation
+                            .selectors
+                            .iter()
+                            .map(|selector| {
+                                let id = intern_selector(
+                                    selector,
+                                    &mut ids,
+                                    &mut selectors,
+                                    &mut primary_uses,
+                                    &mut needs_ranges,
+                                );
+                                needs_ranges[id] = true;
+                                id
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            );
+        }
+        let mut by_kind: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut any_kind = Vec::new();
+        for (id, selector) in selectors.iter().enumerate() {
+            if let Some(kinds) = &selector.potential_kinds {
+                for kind in kinds {
+                    by_kind.entry(*kind).or_default().push(id);
+                }
+            } else {
+                any_kind.push(id);
+            }
+        }
+        FinderPlan {
+            selectors,
+            primary_uses,
+            relation_selectors,
+            needs_ranges,
+            by_kind,
+            any_kind,
+        }
+    }
+
     fn parse(source: &str, language: Language) -> Result<ParsedFile> {
         let ast = backend_language(language).ast_grep(source);
         ensure!(
@@ -487,102 +570,71 @@ impl StructuralBackend for AstGrepBackend {
         Ok(ParsedFile(ast))
     }
 
-    fn select_many(file: &ParsedFile, rules: &[&CompiledRule], profile: bool) -> Selection {
+    fn select_many(
+        file: &ParsedFile,
+        rules: &[&CompiledRule],
+        plan: &FinderPlan,
+        profile: bool,
+    ) -> Selection {
         let started = Instant::now();
         let mut ownership = Duration::ZERO;
         let mut matches = vec![Vec::new(); rules.len()];
-        let mut by_kind: HashMap<usize, Vec<usize>> = HashMap::new();
-        let mut any_kind = Vec::new();
-        for (index, rule) in rules.iter().enumerate() {
-            if let Some(kinds) = &rule.selector.potential_kinds {
-                for kind in kinds {
-                    by_kind.entry(*kind).or_default().push(index);
-                }
-            } else {
-                any_kind.push(index);
-            }
-        }
-        let mut relation_ranges = rules
-            .iter()
-            .map(|rule| {
-                rule.relations
-                    .iter()
-                    .map(|relation| vec![Vec::new(); relation.selectors.len()])
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        let mut auxiliary_by_kind: HashMap<usize, Vec<AuxiliarySelectorIndex>> = HashMap::new();
-        let mut auxiliary_any_kind = Vec::new();
-        let mut selector_executions = rules.len();
-        for (rule_index, rule) in rules.iter().enumerate() {
-            for (relation_index, relation) in rule.relations.iter().enumerate() {
-                selector_executions += relation.selectors.len();
-                for (selector_index, selector) in relation.selectors.iter().enumerate() {
-                    let index = AuxiliarySelectorIndex {
-                        rule: rule_index,
-                        relation: relation_index,
-                        selector: selector_index,
-                    };
-                    if let Some(kinds) = &selector.potential_kinds {
-                        for kind in kinds {
-                            auxiliary_by_kind.entry(*kind).or_default().push(index);
-                        }
-                    } else {
-                        auxiliary_any_kind.push(index);
-                    }
-                }
-            }
-        }
+        debug_assert_eq!(rules.len(), plan.relation_selectors.len());
+        let mut selector_ranges = vec![Vec::new(); plan.selectors.len()];
         for candidate in file.0.root().dfs() {
             let kind = usize::from(candidate.kind_id());
-            let candidates = by_kind.get(&kind).into_iter().flatten().chain(&any_kind);
-            for &index in candidates {
-                let rule = rules[index];
-                let Some(matched) = match_candidate(&rule.selector, candidate.clone()) else {
-                    continue;
-                };
-                if !text_conditions_match(rule, &matched) {
-                    continue;
-                }
-                let owner_started = profile.then(Instant::now);
-                let owner = matched
-                    .ancestors()
-                    .find(|ancestor| rule.owners.iter().any(|kind| ancestor.matches(kind)));
-                let Some(owner) = owner else {
-                    if let Some(owner_started) = owner_started {
-                        ownership += owner_started.elapsed();
-                    }
-                    continue;
-                };
-                matches[index].push(OwnedMatch {
-                    range: byte_range(&matched),
-                    owner: RawOwner {
-                        range: byte_range(&owner),
-                    },
-                });
-                if let Some(owner_started) = owner_started {
-                    ownership += owner_started.elapsed();
-                }
-            }
-            let auxiliary = auxiliary_by_kind
+            let selector_ids = plan
+                .by_kind
                 .get(&kind)
                 .into_iter()
                 .flatten()
-                .chain(&auxiliary_any_kind);
-            for &index in auxiliary {
-                let selector =
-                    &rules[index.rule].relations[index.relation].selectors[index.selector];
-                let Some(matched) = match_candidate(selector, candidate.clone()) else {
+                .chain(&plan.any_kind);
+            for &selector_id in selector_ids {
+                let Some(matched) =
+                    match_candidate(&plan.selectors[selector_id], candidate.clone())
+                else {
                     continue;
                 };
-                relation_ranges[index.rule][index.relation][index.selector]
-                    .push(byte_range(&matched));
+                if plan.needs_ranges[selector_id] {
+                    selector_ranges[selector_id].push(byte_range(&matched));
+                }
+                for &rule_index in &plan.primary_uses[selector_id] {
+                    let rule = rules[rule_index];
+                    if !text_conditions_match(rule, &matched) {
+                        continue;
+                    }
+                    let owner_started = profile.then(Instant::now);
+                    let owner = matched
+                        .ancestors()
+                        .find(|ancestor| rule.owners.iter().any(|kind| ancestor.matches(kind)));
+                    let Some(owner) = owner else {
+                        if let Some(owner_started) = owner_started {
+                            ownership += owner_started.elapsed();
+                        }
+                        continue;
+                    };
+                    matches[rule_index].push(OwnedMatch {
+                        range: byte_range(&matched),
+                        owner: RawOwner {
+                            range: byte_range(&owner),
+                        },
+                    });
+                    if let Some(owner_started) = owner_started {
+                        ownership += owner_started.elapsed();
+                    }
+                }
             }
         }
         for (index, rule) in rules.iter().enumerate() {
             let mut group_cache = HashMap::new();
             matches[index].retain(|matched| {
-                relations_match(rule, matched, &relation_ranges[index], &mut group_cache)
+                relations_match(
+                    rule,
+                    matched,
+                    &plan.relation_selectors[index],
+                    &selector_ranges,
+                    &mut group_cache,
+                )
             });
         }
         let total = if profile {
@@ -592,7 +644,7 @@ impl StructuralBackend for AstGrepBackend {
         };
         Selection {
             matches,
-            selector_executions,
+            selector_executions: plan.selectors.len(),
             timings: SelectionTimings {
                 matching: total.saturating_sub(ownership),
                 ownership,
@@ -633,35 +685,50 @@ fn text_conditions_match(
 fn relations_match(
     rule: &CompiledRule,
     matched: &OwnedMatch,
-    facts: &[Vec<Vec<ByteRange>>],
+    relation_selectors: &[Vec<usize>],
+    selector_ranges: &[Vec<ByteRange>],
     group_cache: &mut HashMap<(usize, usize, usize), bool>,
 ) -> bool {
     rule.relations
         .iter()
         .enumerate()
         .all(|(index, relation)| match relation.target {
-            RelationTarget::Match => relation_matches(relation, matched.range, &facts[index]),
+            RelationTarget::Match => relation_matches(
+                relation,
+                matched.range,
+                &relation_selectors[index],
+                selector_ranges,
+            ),
             RelationTarget::Group => *group_cache
                 .entry((index, matched.owner.range.start, matched.owner.range.end))
-                .or_insert_with(|| relation_matches(relation, matched.owner.range, &facts[index])),
+                .or_insert_with(|| {
+                    relation_matches(
+                        relation,
+                        matched.owner.range,
+                        &relation_selectors[index],
+                        selector_ranges,
+                    )
+                }),
         })
 }
 
 fn relation_matches(
     relation: &CompiledRelationCondition,
     target: ByteRange,
-    facts: &[Vec<ByteRange>],
+    selector_ids: &[usize],
+    selector_ranges: &[Vec<ByteRange>],
 ) -> bool {
-    let selection_matches = |ranges: &Vec<ByteRange>| {
+    let selection_matches = |selector_id: &usize| {
+        let ranges = &selector_ranges[*selector_id];
         ranges.iter().any(|range| match relation.target {
             RelationTarget::Match => contains(*range, target),
             RelationTarget::Group => contains(target, *range),
         })
     };
     let matched = if relation.require_all {
-        facts.iter().all(selection_matches)
+        selector_ids.iter().all(selection_matches)
     } else {
-        facts.iter().any(selection_matches)
+        selector_ids.iter().any(selection_matches)
     };
     match relation.relation {
         Relation::Has | Relation::Inside => matched,

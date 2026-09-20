@@ -105,9 +105,11 @@ only invokes the engine and parses the small metadata document.
 
 Within a process, compiled rules and parsed files use bounded, content-validated
 caches. Files are checked in batches of at most four native workers. Completed
-batch results are merged before the next batch. Rules with the
-same language, selector, and owner boundary share one execution, and all unique
-selectors for a language are dispatched during one AST traversal per file. Final
+batch results are merged before the next batch. Rules with identical matching and
+owner conditions share one execution group, and all unique primary and relational
+selectors are interned into a shared finder plan. Each unique
+selector is dispatched during one AST traversal per file; rule-specific predicates,
+ownership, aggregation, thresholds, and reporting remain independent. Final
 findings are sorted after parallel work, preserving deterministic output.
 
 ## Current boundaries
