@@ -68,6 +68,8 @@ pub enum Relation {
     Has,
     Lacks,
     Inside,
+    Follows,
+    Precedes,
 }
 
 #[derive(Debug)]

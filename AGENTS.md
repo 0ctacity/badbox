@@ -109,9 +109,12 @@ The DSL currently supports:
 - `where match inside any|all { ... }`;
 - `where group has any|all { ... }`;
 - `where group lacks any|all { ... }`;
+- `where match follows any|all { ... }` and `where match precedes any|all { ... }` for Rust, Go,
+  PowerShell, and Zig callable groups;
 - strictly greater-than count thresholds and scalar parameter overrides.
 
-`follows`, `precedes`, and unsupported target/relation combinations are parsed but rejected
+Ordering is statement-level within the same nearest callable and lexical block; intervening
+siblings are allowed. Immediate ordering and unsupported target/relation combinations are rejected
 explicitly. Never silently ignore a parsed rule condition.
 
 Badbox ships the 28 ast-grep builtin parsers plus statically linked PowerShell and Zig parsers.

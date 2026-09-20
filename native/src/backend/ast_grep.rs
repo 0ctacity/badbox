@@ -59,9 +59,35 @@ pub struct FinderPlan {
     selectors: Vec<Arc<CompiledStructuralSelector>>,
     primary_uses: Vec<Vec<usize>>,
     relation_selectors: Vec<Vec<Vec<usize>>>,
+    ordering_uses: Vec<Vec<OrderingUse>>,
+    rules_need_sequence: Vec<bool>,
     needs_ranges: Vec<bool>,
     by_kind: HashMap<usize, Vec<usize>>,
     any_kind: Vec<usize>,
+}
+
+#[derive(Clone, Copy)]
+struct OrderingUse {
+    rule_index: usize,
+    relation_index: usize,
+    selection_index: usize,
+}
+
+#[derive(Clone, Copy)]
+struct SequenceContext {
+    statement: ByteRange,
+    block: ByteRange,
+}
+
+#[derive(Clone, Copy)]
+struct OrderingFact {
+    owner: ByteRange,
+    sequence: SequenceContext,
+}
+
+struct CandidateMatch {
+    matched: OwnedMatch,
+    sequence: Option<SequenceContext>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -418,6 +444,7 @@ fn intern_selector(
     selectors: &mut Vec<Arc<CompiledStructuralSelector>>,
     primary_uses: &mut Vec<Vec<usize>>,
     needs_ranges: &mut Vec<bool>,
+    ordering_uses: &mut Vec<Vec<OrderingUse>>,
 ) -> usize {
     if let Some(id) = ids.get(&selector.selection) {
         return *id;
@@ -427,6 +454,7 @@ fn intern_selector(
     selectors.push(Arc::clone(selector));
     primary_uses.push(Vec::new());
     needs_ranges.push(false);
+    ordering_uses.push(Vec::new());
     id
 }
 
@@ -458,15 +486,25 @@ impl StructuralBackend for AstGrepBackend {
                     relation,
                     require_all,
                     selections,
-                } => relations.push(CompiledRelationCondition {
-                    target: *target,
-                    relation: *relation,
-                    require_all: *require_all,
-                    selectors: selections
-                        .iter()
-                        .map(|selection| compile_selector(selection, rule.language, language))
-                        .collect::<Result<_>>()?,
-                }),
+                } => {
+                    if matches!(relation, Relation::Follows | Relation::Precedes) {
+                        ensure!(
+                            sequence_container_kinds(rule.language).is_some(),
+                            "rule {} uses follows or precedes, which is not mapped for {:?} yet",
+                            rule.id,
+                            rule.language
+                        );
+                    }
+                    relations.push(CompiledRelationCondition {
+                        target: *target,
+                        relation: *relation,
+                        require_all: *require_all,
+                        selectors: selections
+                            .iter()
+                            .map(|selection| compile_selector(selection, rule.language, language))
+                            .collect::<Result<_>>()?,
+                    });
+                }
             }
         }
         let owners = rule
@@ -507,7 +545,9 @@ impl StructuralBackend for AstGrepBackend {
         let mut selectors = Vec::new();
         let mut primary_uses = Vec::new();
         let mut needs_ranges = Vec::new();
+        let mut ordering_uses = Vec::new();
         let mut relation_selectors = Vec::with_capacity(rules.len());
+        let mut rules_need_sequence = vec![false; rules.len()];
         for (rule_index, rule) in rules.iter().enumerate() {
             let primary = intern_selector(
                 &rule.selector,
@@ -515,24 +555,39 @@ impl StructuralBackend for AstGrepBackend {
                 &mut selectors,
                 &mut primary_uses,
                 &mut needs_ranges,
+                &mut ordering_uses,
             );
             primary_uses[primary].push(rule_index);
             relation_selectors.push(
                 rule.relations
                     .iter()
-                    .map(|relation| {
+                    .enumerate()
+                    .map(|(relation_index, relation)| {
+                        let ordering =
+                            matches!(relation.relation, Relation::Follows | Relation::Precedes);
+                        rules_need_sequence[rule_index] |= ordering;
                         relation
                             .selectors
                             .iter()
-                            .map(|selector| {
+                            .enumerate()
+                            .map(|(selection_index, selector)| {
                                 let id = intern_selector(
                                     selector,
                                     &mut ids,
                                     &mut selectors,
                                     &mut primary_uses,
                                     &mut needs_ranges,
+                                    &mut ordering_uses,
                                 );
-                                needs_ranges[id] = true;
+                                if ordering {
+                                    ordering_uses[id].push(OrderingUse {
+                                        rule_index,
+                                        relation_index,
+                                        selection_index,
+                                    });
+                                } else {
+                                    needs_ranges[id] = true;
+                                }
                                 id
                             })
                             .collect()
@@ -555,6 +610,8 @@ impl StructuralBackend for AstGrepBackend {
             selectors,
             primary_uses,
             relation_selectors,
+            ordering_uses,
+            rules_need_sequence,
             needs_ranges,
             by_kind,
             any_kind,
@@ -578,9 +635,18 @@ impl StructuralBackend for AstGrepBackend {
     ) -> Selection {
         let started = Instant::now();
         let mut ownership = Duration::ZERO;
-        let mut matches = vec![Vec::new(); rules.len()];
+        let mut matches: Vec<Vec<CandidateMatch>> = (0..rules.len()).map(|_| Vec::new()).collect();
         debug_assert_eq!(rules.len(), plan.relation_selectors.len());
         let mut selector_ranges = vec![Vec::new(); plan.selectors.len()];
+        let mut ordering_facts = rules
+            .iter()
+            .map(|rule| {
+                rule.relations
+                    .iter()
+                    .map(|relation| vec![Vec::new(); relation.selectors.len()])
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
         for candidate in file.0.root().dfs() {
             let kind = usize::from(candidate.kind_id());
             let selector_ids = plan
@@ -598,6 +664,27 @@ impl StructuralBackend for AstGrepBackend {
                 if plan.needs_ranges[selector_id] {
                     selector_ranges[selector_id].push(byte_range(&matched));
                 }
+                let ordering_started = (!plan.ordering_uses[selector_id].is_empty())
+                    .then(|| profile.then(Instant::now))
+                    .flatten();
+                for ordering_use in &plan.ordering_uses[selector_id] {
+                    let rule = rules[ordering_use.rule_index];
+                    let owner = matched
+                        .ancestors()
+                        .find(|ancestor| rule.owners.iter().any(|kind| ancestor.matches(kind)));
+                    let sequence = sequence_context(matched.get_node(), rule.rule.language);
+                    if let (Some(owner), Some(sequence)) = (owner, sequence) {
+                        ordering_facts[ordering_use.rule_index][ordering_use.relation_index]
+                            [ordering_use.selection_index]
+                            .push(OrderingFact {
+                                owner: byte_range(&owner),
+                                sequence,
+                            });
+                    }
+                }
+                if let Some(ordering_started) = ordering_started {
+                    ownership += ordering_started.elapsed();
+                }
                 for &rule_index in &plan.primary_uses[selector_id] {
                     let rule = rules[rule_index];
                     if !text_conditions_match(rule, &matched) {
@@ -613,11 +700,16 @@ impl StructuralBackend for AstGrepBackend {
                         }
                         continue;
                     };
-                    matches[rule_index].push(OwnedMatch {
-                        range: byte_range(&matched),
-                        owner: RawOwner {
-                            range: byte_range(&owner),
+                    matches[rule_index].push(CandidateMatch {
+                        matched: OwnedMatch {
+                            range: byte_range(&matched),
+                            owner: RawOwner {
+                                range: byte_range(&owner),
+                            },
                         },
+                        sequence: plan.rules_need_sequence[rule_index]
+                            .then(|| sequence_context(matched.get_node(), rule.rule.language))
+                            .flatten(),
                     });
                     if let Some(owner_started) = owner_started {
                         ownership += owner_started.elapsed();
@@ -633,10 +725,20 @@ impl StructuralBackend for AstGrepBackend {
                     matched,
                     &plan.relation_selectors[index],
                     &selector_ranges,
+                    &ordering_facts[index],
                     &mut group_cache,
                 )
             });
         }
+        let matches = matches
+            .into_iter()
+            .map(|matches| {
+                matches
+                    .into_iter()
+                    .map(|candidate| candidate.matched)
+                    .collect()
+            })
+            .collect();
         let total = if profile {
             started.elapsed()
         } else {
@@ -684,32 +786,68 @@ fn text_conditions_match(
 
 fn relations_match(
     rule: &CompiledRule,
-    matched: &OwnedMatch,
+    candidate: &CandidateMatch,
     relation_selectors: &[Vec<usize>],
     selector_ranges: &[Vec<ByteRange>],
+    ordering_facts: &[Vec<Vec<OrderingFact>>],
     group_cache: &mut HashMap<(usize, usize, usize), bool>,
 ) -> bool {
     rule.relations
         .iter()
         .enumerate()
-        .all(|(index, relation)| match relation.target {
-            RelationTarget::Match => relation_matches(
-                relation,
-                matched.range,
-                &relation_selectors[index],
-                selector_ranges,
-            ),
-            RelationTarget::Group => *group_cache
-                .entry((index, matched.owner.range.start, matched.owner.range.end))
-                .or_insert_with(|| {
-                    relation_matches(
-                        relation,
-                        matched.owner.range,
-                        &relation_selectors[index],
-                        selector_ranges,
-                    )
-                }),
+        .all(|(index, relation)| match relation.relation {
+            Relation::Follows | Relation::Precedes => {
+                ordering_relation_matches(relation, candidate, &ordering_facts[index])
+            }
+            _ => match relation.target {
+                RelationTarget::Match => relation_matches(
+                    relation,
+                    candidate.matched.range,
+                    &relation_selectors[index],
+                    selector_ranges,
+                ),
+                RelationTarget::Group => *group_cache
+                    .entry((
+                        index,
+                        candidate.matched.owner.range.start,
+                        candidate.matched.owner.range.end,
+                    ))
+                    .or_insert_with(|| {
+                        relation_matches(
+                            relation,
+                            candidate.matched.owner.range,
+                            &relation_selectors[index],
+                            selector_ranges,
+                        )
+                    }),
+            },
         })
+}
+
+fn ordering_relation_matches(
+    relation: &CompiledRelationCondition,
+    candidate: &CandidateMatch,
+    selections: &[Vec<OrderingFact>],
+) -> bool {
+    let Some(primary) = candidate.sequence else {
+        return false;
+    };
+    let selection_matches = |facts: &Vec<OrderingFact>| {
+        facts.iter().any(|fact| {
+            same_range(fact.owner, candidate.matched.owner.range)
+                && same_range(fact.sequence.block, primary.block)
+                && match relation.relation {
+                    Relation::Follows => fact.sequence.statement.end <= primary.statement.start,
+                    Relation::Precedes => fact.sequence.statement.start >= primary.statement.end,
+                    _ => unreachable!("only ordering relations use ordering facts"),
+                }
+        })
+    };
+    if relation.require_all {
+        selections.iter().all(selection_matches)
+    } else {
+        selections.iter().any(selection_matches)
+    }
 }
 
 fn relation_matches(
@@ -733,6 +871,39 @@ fn relation_matches(
     match relation.relation {
         Relation::Has | Relation::Inside => matched,
         Relation::Lacks => !matched,
+        Relation::Follows | Relation::Precedes => {
+            unreachable!("ordering relations use statement contexts")
+        }
+    }
+}
+
+fn sequence_context(
+    node: &Node<'_, StrDoc<BackendLanguage>>,
+    language: Language,
+) -> Option<SequenceContext> {
+    let containers = sequence_container_kinds(language)?;
+    let mut statement = node.clone();
+    for ancestor in node.ancestors() {
+        if containers.iter().any(|kind| ancestor.kind() == *kind) {
+            return Some(SequenceContext {
+                statement: byte_range(&statement),
+                block: byte_range(&ancestor),
+            });
+        }
+        statement = ancestor;
+    }
+    None
+}
+
+fn same_range(left: ByteRange, right: ByteRange) -> bool {
+    left.start == right.start && left.end == right.end
+}
+
+fn sequence_container_kinds(language: Language) -> Option<&'static [&'static str]> {
+    match language {
+        Language::Rust | Language::Zig => Some(&["block"]),
+        Language::Go | Language::PowerShell => Some(&["statement_list"]),
+        _ => None,
     }
 }
 

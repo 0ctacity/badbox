@@ -195,14 +195,22 @@ The evaluator currently supports these structural combinations:
 - `where group has any|all { ... }` requires the owning group to contain matching evidence.
 - `where group lacks any|all { ... }` requires the owning group not to satisfy the corresponding
   `has` condition.
+- `where match follows any|all { ... }` requires qualifying auxiliary statements before the
+  selected statement.
+- `where match precedes any|all { ... }` requires qualifying auxiliary statements after the
+  selected statement.
 
 Repeated `where` clauses mean all clauses must hold. Badbox collects the primary and auxiliary
 structural matches in one syntax-tree traversal per file, then evaluates the relations from their
 ranges. Identical selectors are collected once and shared by every rule that references them; it
 does not rescan an owner for every primary match.
 
-The parser also recognizes `follows` and `precedes`, but the evaluator rejects them explicitly.
-Other target/relation combinations are likewise rejected rather than silently ignored.
+`follows` and `precedes` require `group by nearest callable`. Primary and auxiliary matches must
+resolve to statements in the same lexical block and to the same nearest callable. Intervening
+sibling statements are allowed. Nested callables and different branch, loop, switch, or
+error-handling blocks do not satisfy the relation. `any` means at least one listed selector has a
+qualifying occurrence; `all` means every listed selector does. Immediate-sibling ordering is not
+implemented. Other target/relation combinations are rejected rather than silently ignored.
 
 ## Tests and fixtures
 
@@ -244,9 +252,9 @@ buffer.
 
 - The crate parses rules and fixtures; it does not read files or execute tests.
 - Badbox executes `find -> where -> group -> count -> threshold -> report`, including text
-  predicates, `match inside`, and `group has/lacks`.
-- `follows`, `precedes`, and unsupported target/relation combinations are parsed but rejected by the
-  scanner.
+  predicates, `match inside`, `group has/lacks`, and `match follows/precedes`.
+- Statement ordering executes for Rust, Go, PowerShell, and Zig callable groups. Immediate ordering
+  and unsupported target/relation combinations are rejected by the scanner.
 - `callable` has semantic mappings for Rust, Go, PowerShell, and Zig. Other languages use explicit
   `node(...)` ownership for now.
 - PowerShell code patterns support single-node declared captures; multiple captures are rejected.

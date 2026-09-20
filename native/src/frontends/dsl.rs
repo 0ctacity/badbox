@@ -18,6 +18,21 @@ pub fn compile(source: &str) -> Result<Vec<Rule>> {
 fn lower_rule(rule: tiny_dsl::Rule) -> Result<Rule> {
     let language = language(&rule.language)?;
     let conditions = lower_conditions(&rule.selection, &rule.where_clauses, language, &rule.id)?;
+    if conditions.iter().any(|condition| {
+        matches!(
+            condition,
+            Condition::Relation {
+                relation: Relation::Follows | Relation::Precedes,
+                ..
+            }
+        )
+    }) {
+        ensure!(
+            matches!(rule.group, Group::Callable),
+            "rule {} uses follows or precedes, which requires grouping by nearest callable",
+            rule.id
+        );
+    }
     let parameters = rule
         .parameters
         .iter()
@@ -146,16 +161,17 @@ fn lower_conditions(
                     tiny_dsl::Relation::Has => Relation::Has,
                     tiny_dsl::Relation::Lacks => Relation::Lacks,
                     tiny_dsl::Relation::Inside => Relation::Inside,
-                    tiny_dsl::Relation::Follows | tiny_dsl::Relation::Precedes => {
-                        bail!(
-                            "rule {rule_id} uses a relational condition that does not execute yet"
-                        )
-                    }
+                    tiny_dsl::Relation::Follows => Relation::Follows,
+                    tiny_dsl::Relation::Precedes => Relation::Precedes,
                 };
                 ensure!(
                     matches!(
                         (target, relation),
                         (RelationTarget::Match, Relation::Inside)
+                            | (
+                                RelationTarget::Match,
+                                Relation::Follows | Relation::Precedes
+                            )
                             | (RelationTarget::Group, Relation::Has | Relation::Lacks)
                     ),
                     "rule {rule_id} uses a relational condition that does not execute yet"
@@ -318,8 +334,8 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_relational_clauses_are_rejected_explicitly() {
-        let error = compile(
+    fn ordering_relations_lower_for_callable_groups() {
+        let rules = compile(
             r#"#badbox 1
 rule rust/guarded for rust {
   summary "guarded"
@@ -335,7 +351,37 @@ rule rust/guarded for rust {
 }
 "#,
         )
-        .expect_err("follows execution is not implemented");
-        assert!(error.to_string().contains("does not execute yet"));
+        .expect("follows lowers into rule IR");
+        assert!(matches!(
+            rules[0].conditions.as_slice(),
+            [Condition::Relation {
+                target: RelationTarget::Match,
+                relation: Relation::Follows,
+                require_all: false,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn ordering_relations_require_callable_groups() {
+        let error = compile(
+            r#"#badbox 1
+rule rust/guarded for rust {
+  summary "guarded"
+  find code(value) `value.clone()`
+  group by nearest node(function_item)
+  where match follows any { node return_expression }
+  when count > 0
+  report {
+    severity info
+    message "guard missing"
+    evidence "clone call sites"
+  }
+}
+"#,
+        )
+        .expect_err("ordering requires a callable boundary");
+        assert!(error.to_string().contains("grouping by nearest callable"));
     }
 }

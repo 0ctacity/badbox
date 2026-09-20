@@ -483,6 +483,148 @@ rule rust/write-with-transaction for rust {
     ]);
   });
 
+  test("executes follows and precedes only between statements in the same lexical block and callable", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "ordering.rs");
+    const rules = join(root, "ordering.badbox");
+    await Bun.write(source, `
+fn follows_any() { prepare(); middle(); target(); }
+fn precedes_any() { target(); middle(); cleanup(); }
+fn follows_all() { prepare(); lock(); target(); }
+fn missing_all() { prepare(); target(); }
+fn wrong_order() { target(); prepare(); }
+fn separate_branches(flag: bool) { if flag { prepare(); } else { target(); } }
+fn match_branches(flag: bool) { match flag { true => prepare(), false => target(), } }
+fn nested_block() { prepare(); loop { target(); break; } }
+fn same_statement() { combine(prepare(), target()); }
+fn nested_callable() { prepare(); let inner = || { target(); }; inner(); }
+`);
+    await Bun.write(rules, `#badbox 1
+rule rust/follows-any for rust {
+  summary "Target follows preparation"
+  find code() \`target()\`
+  group by nearest callable
+  where match follows any { code() \`prepare()\` }
+  when count > 0
+  report {
+    severity warning
+    message "Target follows preparation"
+    evidence "target calls"
+  }
+}
+
+rule rust/precedes-any for rust {
+  summary "Target precedes cleanup"
+  find code() \`target()\`
+  group by nearest callable
+  where match precedes any { code() \`cleanup()\` }
+  when count > 0
+  report {
+    severity warning
+    message "Target precedes cleanup"
+    evidence "target calls"
+  }
+}
+
+rule rust/follows-all for rust {
+  summary "Target follows all preparation selectors"
+  find code() \`target()\`
+  group by nearest callable
+  where match follows all {
+    code() \`prepare()\`
+    code() \`lock()\`
+  }
+  when count > 0
+  report {
+    severity warning
+    message "Target follows all preparation selectors"
+    evidence "target calls"
+  }
+}
+`);
+
+    const result = await inspect({ paths: [source], rulePaths: [rules], profile: true });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.performance?.selectorExecutions).toBe(4);
+    expect(result.performance?.ruleEvaluations).toBe(3);
+    const actual = await Promise.all(records(result).map(async (finding) => [
+      finding.rule.id, await ownerText(finding), finding.observed,
+    ] as const));
+    actual.sort((left, right) => `${left[0]}\0${left[1]}`.localeCompare(`${right[0]}\0${right[1]}`));
+    expect(actual).toEqual([
+      ["rust/follows-all", "fn follows_all() { prepare(); lock(); target(); }", 1],
+      ["rust/follows-any", "fn follows_all() { prepare(); lock(); target(); }", 1],
+      ["rust/follows-any", "fn follows_any() { prepare(); middle(); target(); }", 1],
+      ["rust/follows-any", "fn missing_all() { prepare(); target(); }", 1],
+      ["rust/precedes-any", "fn precedes_any() { target(); middle(); cleanup(); }", 1],
+    ]);
+  });
+
+  test("executes statement ordering across Go, PowerShell, and Zig callable groups", async () => {
+    const cases = [
+      {
+        language: "go",
+        extension: "go",
+        source: `package probe
+func ordered() { prepare(); target() }
+func branches(flag bool) { if flag { prepare() } else { target() } }
+func nested() { prepare(); inner := func() { target() }; inner() }
+`,
+        owner: "func ordered() { prepare(); target() }",
+        prepare: "prepare()",
+        target: "target()",
+      },
+      {
+        language: "powershell",
+        extension: "ps1",
+        source: `function Ordered { Invoke-Prepare; Invoke-Target }
+function Branches { if ($true) { Invoke-Prepare } else { Invoke-Target } }
+function Nested { Invoke-Prepare; function Inner { Invoke-Target }; Inner }
+`,
+        owner: "function Ordered { Invoke-Prepare; Invoke-Target }",
+        prepare: "Invoke-Prepare",
+        target: "Invoke-Target",
+      },
+      {
+        language: "zig",
+        extension: "zig",
+        source: `fn ordered() void { prepare(); target(); }
+fn branches(flag: bool) void { if (flag) { prepare(); } else { target(); } }
+fn nested() void { prepare(); const Inner = struct { fn run() void { target(); } }; Inner.run(); }
+`,
+        owner: "fn ordered() void { prepare(); target(); }",
+        prepare: "prepare()",
+        target: "target()",
+      },
+    ] as const;
+
+    for (const probe of cases) {
+      const root = await temporaryRoot();
+      const source = join(root, `ordering.${probe.extension}`);
+      const rules = join(root, `ordering-${probe.language}.badbox`);
+      await Bun.write(source, probe.source);
+      await Bun.write(rules, `#badbox 1
+rule ${probe.language}/ordering for ${probe.language} {
+  summary "Target follows preparation"
+  find code() \`${probe.target}\`
+  group by nearest callable
+  where match follows any { code() \`${probe.prepare}\` }
+  when count > 0
+  report {
+    severity warning
+    message "Target follows preparation"
+    evidence "target sites"
+  }
+}
+`);
+
+      const result = await inspect({ paths: [source], rulePaths: [rules] });
+      expect(result.diagnostics).toEqual([]);
+      expect(result.findingCount).toBe(1);
+      expect(await ownerText(records(result)[0]!)).toBe(probe.owner);
+    }
+  });
+
   test("interns exact selectors across distinct rule plans", async () => {
     const root = await temporaryRoot();
     const source = join(root, "input.rs");
